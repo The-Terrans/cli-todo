@@ -10,7 +10,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let areas = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(frame.area());
     let panels = Layout::horizontal([
         Constraint::Percentage(25),
-        Constraint::Length(2), // Gap between panels.
+        Constraint::Length(0), // Gap between panels.
         Constraint::Min(0),
     ])
     .split(areas[0]);
@@ -39,11 +39,15 @@ fn selection_style() -> Style {
 }
 
 fn draw_navigation(frame: &mut Frame, area: Rect, app: &App) {
+    let area = Rect {
+        height: area.height.min(FILTERS.len() as u16 + 2),
+        ..area
+    };
     let mut state = ListState::default().with_selected(Some(app.selected_filter));
     let filters = FILTERS.iter().map(|(label, _)| *label);
     frame.render_stateful_widget(
         List::new(filters)
-            .block(panel("──Inbox", app.navigation_focused).borders(Borders::TOP))
+            .block(panel("─[1]─Inbox", app.navigation_focused).border_type(BorderType::Rounded))
             .highlight_style(selection_style())
             .highlight_symbol("> "),
         area,
@@ -63,7 +67,7 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
         ListState::default().with_selected((!app.tasks.is_empty()).then_some(app.selected_task));
     frame.render_stateful_widget(
         List::new(items)
-            .block(panel(" Tasks ", !app.navigation_focused).border_type(BorderType::Rounded))
+            .block(panel("─[0]─Tasks", !app.navigation_focused).border_type(BorderType::Rounded))
             .highlight_style(selection_style())
             .highlight_symbol("> "),
         area,
@@ -80,8 +84,8 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_help(frame: &mut Frame, area: Rect) {
     frame.render_widget(
         Paragraph::new(concat!(
-            "Tab: panel | Arrows: move | Enter: open | a: add | e: edit | ",
-            "Space: complete | d: delete | Esc: cancel | q: quit | ",
+            "0/1: section | Arrows: move | Enter: open | a: add | e: edit | ",
+            "Space: complete | d: delete | Esc: back/cancel | q: quit | ",
             "Ctrl+K: search tasks/actions",
         )),
         area,

@@ -48,19 +48,21 @@ with tempfile.TemporaryDirectory() as data:
     proc, master, slave, before = launch()
     try:
         first = screen()
-        assert b"Inbox" in first and b"Tasks" in first and b"Tab: panel" in first
+        assert b"Inbox" in first and b"Tasks" in first and b"0/1: section" in first
         assert b"Title cannot be empty" in send(b"a\r")
         send(b"first\r")
         assert rows() == [("first", 0)]
         send(b"aabandoned\x1b")
         assert len(rows()) == 1
-        send(b"\t\r!\r")
+        send(b"\r\r!\r")
         assert rows() == [("first!", 0)]
         send(b" ")
         assert rows() == [("first!", 1)]
-        assert b"No tasks here" in send(b"\t\x1b[B")
+        send(b"\x1b")
+        assert b"No tasks here" in send(b"\x1b[B")
         send(b"\r")
-        send(b"\t\x1b[B\r")
+        send(b"\x1b")
+        send(b"\x1b[B\r")
         assert b"Delete task?" in send(b"d")
         send(b"\x1b")
         assert len(rows()) == 1

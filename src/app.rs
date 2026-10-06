@@ -105,7 +105,9 @@ impl App {
 
     fn handle_browse_key(&mut self, key: KeyCode) -> Result<()> {
         match key {
-            KeyCode::Tab | KeyCode::BackTab => self.navigation_focused = !self.navigation_focused,
+            KeyCode::Char('0') => self.navigation_focused = false,
+            KeyCode::Char('1') => self.navigation_focused = true,
+            KeyCode::Esc => self.navigation_focused = true,
             KeyCode::Char('a') => {
                 self.execute_action(Action::Add)?;
             }
@@ -342,6 +344,43 @@ mod tests {
     }
 
     #[test]
+    fn enter_and_escape_switch_panels_while_tab_does_nothing() -> Result<()> {
+        let mut app = app()?;
+        for key in [KeyCode::Esc, KeyCode::Tab, KeyCode::BackTab] {
+            app.handle_key(key)?;
+            assert!(app.navigation_focused);
+        }
+        app.handle_key(KeyCode::Enter)?;
+        assert!(!app.navigation_focused);
+        for key in [KeyCode::Tab, KeyCode::BackTab] {
+            app.handle_key(key)?;
+            assert!(!app.navigation_focused);
+        }
+        app.handle_key(KeyCode::Esc)?;
+        assert!(app.navigation_focused);
+        Ok(())
+    }
+
+    #[test]
+    fn number_keys_focus_sections_but_remain_text_in_dialogs() -> Result<()> {
+        let mut app = app()?;
+        app.handle_key(KeyCode::Char('0'))?;
+        assert!(!app.navigation_focused);
+        app.handle_key(KeyCode::Char('1'))?;
+        assert!(app.navigation_focused);
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Char('0'))?;
+        app.handle_key(KeyCode::Char('1'))?;
+        assert!(matches!(&app.mode, Mode::Edit(None, text) if text == "01"));
+        assert!(app.navigation_focused);
+        app.handle_key(KeyCode::Esc)?;
+        search_actions(&mut app, "01")?;
+        assert!(matches!(&app.mode, Mode::Palette { query, .. } if query == "01"));
+        assert!(app.navigation_focused);
+        Ok(())
+    }
+
+    #[test]
     fn palette_finds_tasks_outside_current_filter() -> Result<()> {
         let mut app = app()?;
         db::save_task(&app.db, None, "Buy MILK")?;
@@ -509,7 +548,7 @@ mod tests {
         app.handle_key(KeyCode::Char('x'))?;
         app.handle_key(KeyCode::Esc)?;
         assert_eq!(app.tasks.len(), 1);
-        app.handle_key(KeyCode::Tab)?;
+        app.handle_key(KeyCode::Enter)?;
         app.handle_key(KeyCode::Char('e'))?;
         app.handle_key(KeyCode::Backspace)?;
         app.handle_key(KeyCode::Esc)?;
@@ -536,7 +575,7 @@ mod tests {
         app.handle_key(KeyCode::Down)?;
         app.handle_key(KeyCode::Down)?;
         assert_eq!(app.selected_task, 1);
-        app.handle_key(KeyCode::BackTab)?;
+        app.handle_key(KeyCode::Esc)?;
         assert!(app.navigation_focused);
         app.handle_key(KeyCode::Right)?;
         assert_eq!(app.selected_filter, 1);
@@ -555,7 +594,7 @@ mod tests {
         app.handle_key(KeyCode::Char(' '))?;
         assert!(app.tasks.is_empty());
         assert_eq!(app.selected_task, 0);
-        app.handle_key(KeyCode::Tab)?;
+        app.handle_key(KeyCode::Esc)?;
         app.handle_key(KeyCode::Down)?;
         assert!(app.tasks[0].done);
         app.handle_key(KeyCode::Enter)?;
@@ -571,7 +610,7 @@ mod tests {
         app.refresh_tasks()?;
         app.handle_key(KeyCode::Char('d'))?;
         assert!(matches!(app.mode, Mode::Browse));
-        app.handle_key(KeyCode::Tab)?;
+        app.handle_key(KeyCode::Enter)?;
         for cancel in [KeyCode::Esc, KeyCode::Char('n')] {
             app.handle_key(KeyCode::Char('d'))?;
             app.handle_key(cancel)?;

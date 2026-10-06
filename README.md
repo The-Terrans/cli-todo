@@ -17,7 +17,8 @@ Without Nix, install a Rust toolchain, pkg-config, and SQLite development librar
 
 | Key                          | Action                                                   |
 | ---------------------------- | -------------------------------------------------------- |
-| Tab / Shift-Tab              | Switch panel focus (cyan border)                         |
+| Esc while browsing           | Return from Tasks to Inbox; no effect in Inbox           |
+| 0 / 1 while browsing         | Focus Tasks / Inbox directly                             |
 | Up / Down                    | Choose Inbox filter in navigation, or task in main panel |
 | Enter                        | Open Inbox filter / edit selected task                   |
 | a                            | Add a task from either panel                             |
