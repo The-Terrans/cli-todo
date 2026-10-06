@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 pub fn draw(frame: &mut Frame, app: &App) {
-    let areas = Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).split(frame.area());
+    let areas = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(frame.area());
     let panels = Layout::horizontal([Constraint::Percentage(25), Constraint::Percentage(75)])
         .split(areas[0]);
     draw_navigation(frame, panels[0], app);
@@ -76,9 +76,9 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_help(frame: &mut Frame, area: Rect) {
     frame.render_widget(
         Paragraph::new(concat!(
-            "Tab: panel  Arrows: move  Enter: open  a: add  e: edit\n",
-            "Space: complete  d: delete  Esc: cancel  q: quit\n",
-            "Ctrl+K: search actions",
+            "Tab: panel | Arrows: move | Enter: open | a: add | e: edit | ",
+            "Space: complete | d: delete | Esc: cancel | q: quit | ",
+            "Ctrl+K: search tasks/actions",
         )),
         area,
     );
@@ -120,15 +120,18 @@ fn draw_palette(frame: &mut Frame, app: &App) {
     .split(block.inner(area));
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
-    frame.render_widget(Paragraph::new(format!("Search actions: {query}▏")), rows[0]);
+    frame.render_widget(
+        Paragraph::new(format!("Search tasks/actions: {query}▏")),
+        rows[0],
+    );
 
-    let actions = app.palette_actions();
+    let actions = app.palette_results();
     if actions.is_empty() {
-        frame.render_widget(Paragraph::new("No matching actions"), rows[1]);
+        frame.render_widget(Paragraph::new("No matching tasks or actions"), rows[1]);
     } else {
         let mut state = ListState::default().with_selected(Some(*selected));
         frame.render_stateful_widget(
-            List::new(actions.iter().map(|(label, _)| *label))
+            List::new(actions.iter().map(|(label, _)| label.as_str()))
                 .highlight_style(selection_style())
                 .highlight_symbol("> "),
             rows[1],

@@ -18,6 +18,7 @@ pub enum Action {
     ToggleCompletion,
     Delete,
     ShowFilter(usize),
+    OpenTask(i64),
     Quit,
 }
 
@@ -41,6 +42,7 @@ pub enum Mode {
 
 pub struct App {
     db: Connection,
+    palette_tasks: Vec<Task>,
     pub tasks: Vec<Task>,
     pub selected_task: usize,
     pub navigation_focused: bool,
@@ -53,6 +55,7 @@ impl App {
     pub fn new(db: Connection) -> Result<Self> {
         let mut app = Self {
             db,
+            palette_tasks: vec![],
             tasks: vec![],
             selected_task: 0,
             navigation_focused: true,
@@ -77,7 +80,7 @@ impl App {
         }
         let modifiers = key.modifiers.difference(KeyModifiers::SHIFT);
         if modifiers == KeyModifiers::CONTROL && matches!(key.code, KeyCode::Char('k' | 'K')) {
-            self.toggle_palette();
+            self.toggle_palette()?;
             return Ok(false);
         }
         if !modifiers.is_empty() {
@@ -176,14 +179,22 @@ impl App {
                 self.select_filter(filter)?;
                 self.navigation_focused = false;
             }
+            Action::OpenTask(id) => {
+                self.select_filter(0)?;
+                if let Some(index) = self.tasks.iter().position(|task| task.id == id) {
+                    self.selected_task = index;
+                }
+                self.navigation_focused = false;
+            }
             Action::Quit => return Ok(true),
         }
         Ok(false)
     }
 
-    fn toggle_palette(&mut self) {
+    fn toggle_palette(&mut self) -> Result<()> {
         match self.mode {
             Mode::Browse => {
+                self.palette_tasks = db::list_tasks(&self.db, Filter::All)?;
                 self.mode = Mode::Palette {
                     query: String::new(),
                     selected: 0,
@@ -192,6 +203,7 @@ impl App {
             Mode::Palette { .. } => self.mode = Mode::Browse,
             Mode::Edit(..) | Mode::Delete(_) => {}
         }
+        Ok(())
     }
 
     pub fn palette_actions(&self) -> Vec<(&'static str, Action)> {
@@ -210,8 +222,36 @@ impl App {
             .collect()
     }
 
+    pub fn palette_results(&self) -> Vec<(String, Action)> {
+        let Mode::Palette { query, .. } = &self.mode else {
+            return vec![];
+        };
+        let query = query.trim().to_lowercase();
+        let mut results: Vec<_> = self
+            .palette_actions()
+            .into_iter()
+            .map(|(label, action)| (format!("Action: {label}"), action))
+            .collect();
+        results.extend(
+            self.palette_tasks
+                .iter()
+                .filter(|task| task.title.to_lowercase().contains(&query))
+                .map(|task| {
+                    (
+                        format!(
+                            "Task: [{}] {}",
+                            if task.done { "x" } else { " " },
+                            task.title
+                        ),
+                        Action::OpenTask(task.id),
+                    )
+                }),
+        );
+        results
+    }
+
     fn handle_palette_key(&mut self, key: KeyCode) -> Result<bool> {
-        let actions = self.palette_actions();
+        let actions = self.palette_results();
         let Mode::Palette { query, selected } = &mut self.mode else {
             return Ok(false);
         };
@@ -298,6 +338,27 @@ mod tests {
                 !app.handle_key_event(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))?
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn palette_finds_tasks_outside_current_filter() -> Result<()> {
+        let mut app = app()?;
+        db::save_task(&app.db, None, "Buy MILK")?;
+        let id = app.db.last_insert_rowid();
+        db::toggle_task(&app.db, id)?;
+        app.select_filter(1)?;
+        assert!(app.tasks.is_empty());
+        search_actions(&mut app, "milk")?;
+        let results = app.palette_results();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, Action::OpenTask(id));
+        app.handle_key(KeyCode::Enter)?;
+        assert_eq!(app.selected_filter, 0);
+        assert_eq!(app.tasks[app.selected_task].id, id);
+        assert!(!app.navigation_focused);
+        app.handle_key(KeyCode::Char('e'))?;
+        assert!(matches!(app.mode, Mode::Edit(Some(task_id), _) if task_id == id));
         Ok(())
     }
 

@@ -71,10 +71,13 @@ with tempfile.TemporaryDirectory() as data:
         send(b"\rdy")
         assert rows() == []
         assert b"Commands" in send(b"\x0b")
-        assert b"No matching actions" in send(b"zzzz")
+        assert b"No matching tasks or actions" in send(b"zzzz")
         send(b"\x1b")
         send(b"\x0badd\rpalette task\r")
         assert rows() == [("palette task", 0)]
+        send(b"\x0bpending\r")
+        assert b"Task:" in send(b"\x0bpalette task")
+        send(b"\r")
         send(b"\x0bedit\r!\r")
         assert rows() == [("palette task!", 0)]
         send(b"\x0breopen\r")

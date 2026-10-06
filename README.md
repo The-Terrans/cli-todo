@@ -36,7 +36,7 @@ Navigation offers All, Pending, and Completed filters. Arrows apply the filter i
 
 ## Command palette
 
-Press **Ctrl+K**, type an action name, use **Up/Down** to choose, and press **Enter** to run. **Esc** or **Ctrl+K** closes it. Search is case-insensitive substring matching of action names (not task titles).
+Press **Ctrl+K**, type a task title or action name, use **Up/Down** to choose, and press **Enter**. **Esc** or **Ctrl+K** closes it. Search uses case-insensitive substring matching across all tasks, including tasks outside the current status filter. Results are labeled Action or Task. Selecting a task switches to All and focuses that task; use the usual shortcuts to edit, complete, or delete it.
 
 Actions: add, edit selected task, complete/reopen selected task, delete selected task, show All/Pending/Completed, and quit. Task actions work from either panel and are hidden when no task is selected. Delete still asks for confirmation. Ctrl+K does not interrupt editing or deletion confirmation. Typing `q` in the palette searches for Quit; Enter is required to execute it.
 
