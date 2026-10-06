@@ -2,16 +2,20 @@ use crate::app::{App, Mode, FILTERS};
 use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let areas = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(frame.area());
-    let panels = Layout::horizontal([Constraint::Percentage(25), Constraint::Percentage(75)])
-        .split(areas[0]);
+    let panels = Layout::horizontal([
+        Constraint::Percentage(25),
+        Constraint::Length(2), // Gap between panels.
+        Constraint::Min(0),
+    ])
+    .split(areas[0]);
     draw_navigation(frame, panels[0], app);
-    draw_tasks(frame, panels[1], app);
+    draw_tasks(frame, panels[2], app);
     draw_help(frame, areas[1]);
     draw_dialog(frame, app);
 }
@@ -39,7 +43,7 @@ fn draw_navigation(frame: &mut Frame, area: Rect, app: &App) {
     let filters = FILTERS.iter().map(|(label, _)| *label);
     frame.render_stateful_widget(
         List::new(filters)
-            .block(panel(" Inbox ", app.navigation_focused))
+            .block(panel("──Inbox", app.navigation_focused).borders(Borders::TOP))
             .highlight_style(selection_style())
             .highlight_symbol("> "),
         area,
@@ -59,7 +63,7 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
         ListState::default().with_selected((!app.tasks.is_empty()).then_some(app.selected_task));
     frame.render_stateful_widget(
         List::new(items)
-            .block(panel(" Tasks ", !app.navigation_focused))
+            .block(panel(" Tasks ", !app.navigation_focused).border_type(BorderType::Rounded))
             .highlight_style(selection_style())
             .highlight_symbol("> "),
         area,
