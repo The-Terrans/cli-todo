@@ -5,11 +5,11 @@ A local Rust terminal todo app using Ratatui and SQLite. One Inbox, two panels, 
 ## Run
 
 ```sh
-nix develop
+nix develop path:./.nix
 cargo run
 ```
 
-If flakes are not enabled, use `nix --extra-experimental-features 'nix-command flakes' develop` instead. First use downloads dependencies. The flake provides a development shell (not a `nix run` package), with Rust, Cargo, rustfmt, Clippy, pkg-config, and SQLite. `flake.lock` pins Nix dependencies; `Cargo.lock` pins Rust dependencies.
+If flakes are not enabled, use `nix --extra-experimental-features 'nix-command flakes' develop path:./.nix` instead. The explicit `path:` snapshots only `.nix/`, not the surrounding Git repository. First use downloads dependencies. The flake provides a development shell (not a `nix run` package), with Rust, Cargo, rustfmt, Clippy, pkg-config, and SQLite. `.nix/flake.lock` pins Nix dependencies; `Cargo.lock` pins Rust dependencies.
 
 Without Nix, install a Rust toolchain, pkg-config, and SQLite development libraries, then run `cargo run`. Build without launching with `cargo build`.
 
@@ -49,7 +49,7 @@ Quit before copying the database for backup. Database errors exit with an error 
 
 ## Verify
 
-Inside `nix develop`:
+Inside `nix develop path:./.nix`:
 
 ```sh
 cargo fmt --check
