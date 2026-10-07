@@ -42,7 +42,7 @@ Navigation offers All, Pending, and Completed filters. Arrows apply the filter i
 
 ## Projects
 
-The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to create a project. Use arrows to select a project: its tasks preview immediately on the right. **Enter** focuses those tasks. Only the focused section's cursor is highlighted; other sections retain selection without highlighting. **e** renames it. Names must be nonblank and unique.
+The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to create a project. Use arrows to select a project: its tasks preview immediately on the right. **Enter** focuses those tasks. The focused panel has a bold bright-yellow border and a black-on-yellow title, even when its list is empty. Only its row cursor is highlighted; inactive panels have dark-gray borders and no highlighted cursor. **e** renames it. Names must be nonblank and unique.
 
 New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** from Tasks returns to its navigation section. Tab remains disabled.
 

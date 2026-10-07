@@ -38,17 +38,24 @@ fn panel(title: &str, focused: bool) -> Block<'_> {
     Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if focused {
-            Color::Cyan
+        .border_style(if focused {
+            Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Color::DarkGray
-        }))
+            Style::default().fg(Color::DarkGray)
+        })
+        .title_style(if focused {
+            selection_style()
+        } else {
+            Style::default().fg(Color::Gray)
+        })
 }
 
 fn selection_style() -> Style {
     Style::default()
         .fg(Color::Black)
-        .bg(Color::Cyan)
+        .bg(Color::LightYellow)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -339,6 +346,29 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn empty_focused_panels_have_high_contrast_titles_and_borders() -> Result<()> {
+        let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+        let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+        for (key, focused, inactive) in [
+            ('2', (0, 8), (0, 0)),
+            ('3', (0, 16), (0, 8)),
+            ('0', (25, 0), (0, 16)),
+        ] {
+            app.handle_key_event(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE))?;
+            terminal.draw(|frame| draw(frame, &app))?;
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[focused].fg, Color::LightYellow, "section {key}");
+            assert!(buffer[focused].modifier.contains(Modifier::BOLD));
+            let title = &buffer[(focused.0 + 1, focused.1)];
+            assert_eq!(title.fg, Color::Black);
+            assert_eq!(title.bg, Color::LightYellow);
+            assert_eq!(buffer[inactive].fg, Color::DarkGray);
+            assert_ne!(buffer[(inactive.0 + 1, inactive.1)].bg, Color::LightYellow);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn only_focused_section_has_a_highlight() -> Result<()> {
         let db = db::open(Path::new(":memory:"))?;
         db::save_project(&db, None, "Work")?;
@@ -355,7 +385,10 @@ mod tests {
                 .buffer()
                 .content
                 .chunks(100)
-                .filter(|row| row.iter().any(|cell| cell.bg == Color::Cyan))
+                .filter(|row| {
+                    row.iter()
+                        .any(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
+                })
                 .count();
             assert_eq!(highlighted_rows, 1, "section {key}");
             let buffer = terminal.backend().buffer();
