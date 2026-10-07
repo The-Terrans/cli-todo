@@ -30,7 +30,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     } else {
         draw_tasks(frame, panels[2], app);
     }
-    draw_help(frame, areas[1]);
+    draw_help(frame, areas[1], app);
     draw_dialog(frame, app);
 }
 
@@ -145,6 +145,12 @@ fn draw_commit_details(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         format!("{}\n\n{}", app.message, app.commit_details)
     };
+    let remote = if app.remote_url.is_empty() {
+        "not configured (r to set)"
+    } else {
+        &app.remote_url
+    };
+    let text = format!("Origin: {remote}\n\n{text}");
     frame.render_widget(
         Paragraph::new(text).scroll((app.detail_scroll, 0)).block(
             panel("─[0]─Commit details", !app.navigation_focused).border_type(BorderType::Rounded),
@@ -188,7 +194,19 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn draw_help(frame: &mut Frame, area: Rect) {
+fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
+    if !app.message.is_empty() {
+        frame.render_widget(
+            Paragraph::new(app.message.lines().next().unwrap_or(""))
+                .style(Style::default().fg(Color::Cyan)),
+            area,
+        );
+        return;
+    }
+    if app.commits_focused {
+        frame.render_widget(Paragraph::new("r: remote | p: push | P: pull | c: checkpoint | Arrows: move | Enter: details | Esc: back | q: quit"), area);
+        return;
+    }
     frame.render_widget(
         Paragraph::new(concat!(
             "0/1/2/3: section | Arrows: move | Enter: open | a: add | e: edit | ",
@@ -204,6 +222,10 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
         Mode::Browse => return,
         Mode::Palette { .. } => return draw_palette(frame, app),
         Mode::Move { .. } => return draw_move_dialog(frame, app),
+        Mode::RemoteEdit(text) => (
+            " Todo remote (origin) ",
+            format!("{text}▏\nEnter: save · blank removes origin · Esc: cancel\n{}", app.message),
+        ),
         Mode::CommitEdit(text) => (
             " Commit todo snapshot ",
             format!("{text}▏\nEnter: commit SQLite snapshot · Esc: cancel\n{}", app.message),

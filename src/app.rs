@@ -1,10 +1,12 @@
 use crate::{
     db::{self, Filter, Project, Task},
-    history::{Commit, History},
+    history::{Commit, History, SyncResult},
     Result,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rusqlite::Connection;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 
 pub const FILTERS: [(&str, Filter); 3] = [
     ("All", Filter::All),
@@ -44,6 +46,7 @@ pub enum Mode {
     ProjectEdit(Option<i64>, String),
     ProjectDelete(i64),
     CommitEdit(String),
+    RemoteEdit(String),
     Move { task: i64, selected: usize },
 }
 
@@ -57,6 +60,8 @@ pub struct App {
     pub projects_focused: bool,
     pub commits_focused: bool,
     pub uncommitted_changes: bool,
+    pub remote_url: String,
+    sync_receiver: Option<Receiver<std::result::Result<SyncResult, String>>>,
     history: Option<History>,
     pub commits: Vec<Commit>,
     pub selected_commit: usize,
@@ -80,6 +85,8 @@ impl App {
             projects_focused: false,
             commits_focused: false,
             uncommitted_changes: false,
+            remote_url: String::new(),
+            sync_receiver: None,
             history: History::new(&db),
             commits: vec![],
             selected_commit: 0,
@@ -94,6 +101,7 @@ impl App {
         };
         app.refresh_tasks()?;
         app.reload_commits();
+        app.load_remote();
         app.update_commit_status();
         Ok(app)
     }
@@ -139,6 +147,13 @@ impl App {
 
     fn dispatch_key(&mut self, key: KeyCode) -> Result<bool> {
         self.message.clear();
+        if key == KeyCode::Char('q')
+            && self.sync_receiver.is_some()
+            && matches!(self.mode, Mode::Browse | Mode::Delete(_))
+        {
+            self.message = "Sync is in progress; wait before quitting".into();
+            return Ok(false);
+        }
         if key == KeyCode::Char('q') && matches!(self.mode, Mode::Browse | Mode::Delete(_)) {
             return self.execute_action(Action::Quit);
         }
@@ -150,6 +165,7 @@ impl App {
             Mode::ProjectEdit(..) => self.handle_project_edit_key(key)?,
             Mode::ProjectDelete(id) => self.handle_project_delete_key(key, id)?,
             Mode::CommitEdit(_) => self.handle_commit_edit_key(key)?,
+            Mode::RemoteEdit(_) => self.handle_remote_edit_key(key),
             Mode::Move { .. } => self.handle_move_key(key)?,
         }
         Ok(false)
@@ -235,6 +251,10 @@ impl App {
     }
 
     fn begin_commit(&mut self) {
+        if self.sync_receiver.is_some() {
+            self.message = "Wait for sync to finish before committing".into();
+            return;
+        }
         if !self.update_commit_status() {
             return;
         }
@@ -296,6 +316,9 @@ impl App {
         }
         match key {
             KeyCode::Char('c') => self.begin_commit(),
+            KeyCode::Char('r') => self.begin_remote_edit(),
+            KeyCode::Char('p') => self.start_sync(false),
+            KeyCode::Char('P') => self.start_sync(true),
             KeyCode::Up => {
                 self.selected_commit = self.selected_commit.saturating_sub(1);
                 self.preview_commit();
@@ -308,6 +331,151 @@ impl App {
             KeyCode::Enter => self.navigation_focused = false,
             _ => {}
         }
+    }
+
+    fn load_remote(&mut self) {
+        if let Some(history) = &self.history {
+            match history.remote() {
+                Ok(url) => self.remote_url = url,
+                Err(error) => self.message = format!("Could not read origin: {error}"),
+            }
+        }
+    }
+
+    fn begin_remote_edit(&mut self) {
+        if self.sync_receiver.is_some() {
+            self.message = "Wait for sync to finish before changing origin".into();
+            return;
+        }
+        self.load_remote();
+        self.mode = Mode::RemoteEdit(self.remote_url.clone());
+    }
+
+    fn handle_remote_edit_key(&mut self, key: KeyCode) {
+        let Mode::RemoteEdit(text) = &mut self.mode else {
+            return;
+        };
+        match key {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            KeyCode::Char(character) => text.push(character),
+            KeyCode::Enter => self.save_remote(),
+            _ => {}
+        }
+    }
+
+    fn save_remote(&mut self) {
+        let Mode::RemoteEdit(url) = &self.mode else {
+            return;
+        };
+        let result = match &self.history {
+            Some(history) => history.set_remote(url),
+            None => Err("Todo history requires a file-backed database".into()),
+        };
+        match result {
+            Ok(()) => {
+                self.mode = Mode::Browse;
+                self.load_remote();
+                self.message = if self.remote_url.is_empty() {
+                    "Origin removed"
+                } else {
+                    "Origin configured"
+                }
+                .into();
+            }
+            Err(error) => self.message = error.to_string(),
+        }
+    }
+
+    fn start_sync(&mut self, pull: bool) {
+        if self.sync_receiver.is_some() {
+            self.message = "Sync is already in progress".into();
+            return;
+        }
+        if pull {
+            if !self.update_commit_status() {
+                return;
+            }
+            if self.uncommitted_changes {
+                self.message = "Commit your todo changes before pulling".into();
+                return;
+            }
+        }
+        let Some(history) = self.history.clone() else {
+            self.message = "Todo history requires a file-backed database".into();
+            return;
+        };
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let result = if pull {
+                history.fetch_pull()
+            } else {
+                history.push()
+            };
+            let _ = sender.send(result.map_err(|error| error.to_string()));
+        });
+        self.sync_receiver = Some(receiver);
+        self.message = if pull {
+            "Pulling todo checkpoints…"
+        } else {
+            "Pushing todo checkpoints…"
+        }
+        .into();
+    }
+
+    pub fn poll_sync(&mut self) {
+        let Some(receiver) = &self.sync_receiver else {
+            return;
+        };
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("Sync worker stopped unexpectedly".into()),
+        };
+        self.sync_receiver = None;
+        let result = result
+            .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+            .and_then(|result| self.finish_sync(result));
+        self.message = match result {
+            Ok(message) => message,
+            Err(error) => {
+                self.reload_commits();
+                self.update_commit_status();
+                format!("Sync failed: {error}")
+            }
+        };
+    }
+
+    fn finish_sync(&mut self, result: SyncResult) -> Result<String> {
+        let message = match result {
+            SyncResult::Message(message) => message,
+            SyncResult::Pull(plan) => {
+                if !matches!(self.mode, Mode::Browse) {
+                    return Err(
+                        "Finish or cancel the open dialog before applying a pull; retry afterward"
+                            .into(),
+                    );
+                }
+                let history = self.history.as_ref().ok_or("Todo history unavailable")?;
+                let message = history.apply_pull(&mut self.db, plan)?;
+                self.projects = db::list_projects(&self.db)?;
+                if !self
+                    .projects
+                    .iter()
+                    .any(|project| Some(project.id) == self.current_project)
+                {
+                    self.current_project = None;
+                }
+                self.refresh_projects()?;
+                message
+            }
+        };
+        self.reload_commits();
+        self.load_remote();
+        self.update_commit_status();
+        Ok(message)
     }
 
     fn handle_commit_edit_key(&mut self, key: KeyCode) -> Result<()> {
@@ -722,6 +890,117 @@ mod tests {
                 !app.handle_key_event(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))?
             );
         }
+        Ok(())
+    }
+
+    fn wait_for_sync(app: &mut App) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while app.sync_receiver.is_some() {
+            assert!(std::time::Instant::now() < deadline, "sync timed out");
+            app.poll_sync();
+            thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn remote_controls_sync_in_background_and_block_unsafe_pulls() -> Result<()> {
+        use std::{env, fs, process::Command, time::SystemTime};
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_nanos();
+        let root = env::temp_dir().join(format!("cli-todo-app-sync-{stamp}"));
+        fs::create_dir_all(&root)?;
+        let remote = root.join("remote.git");
+        assert!(Command::new("git")
+            .args(["init", "--bare", "--quiet", "--initial-branch=main"])
+            .arg(&remote)
+            .output()?
+            .status
+            .success());
+        let publisher_root = root.join("publisher");
+        fs::create_dir_all(&publisher_root)?;
+        let publisher_db = db::open(&publisher_root.join("tasks.sqlite3"))?;
+        let publisher = History::new(&publisher_db).unwrap();
+        publisher.set_remote(remote.to_str().unwrap())?;
+        for args in [
+            ["config", "user.name", "Todo Test"],
+            ["config", "user.email", "todo@example.test"],
+            ["config", "commit.gpgsign", "false"],
+        ] {
+            assert!(Command::new("git")
+                .arg("-C")
+                .arg(&publisher.directory)
+                .args(args)
+                .output()?
+                .status
+                .success());
+        }
+        db::save_task(&publisher_db, None, "remote task")?;
+        publisher.commit(&publisher_db, "first checkpoint")?;
+        publisher.push()?;
+        let consumer = root.join("consumer");
+        fs::create_dir_all(&consumer)?;
+        let mut app = App::new(db::open(&consumer.join("tasks.sqlite3"))?)?;
+        app.handle_key(KeyCode::Char('3'))?;
+        app.handle_key(KeyCode::Char('r'))?;
+        for character in remote.to_str().unwrap().chars() {
+            app.handle_key(KeyCode::Char(character))?;
+        }
+        app.handle_key(KeyCode::Enter)?;
+        assert_eq!(app.remote_url, remote.to_str().unwrap());
+        app.handle_key(KeyCode::Char('P'))?;
+        assert!(app.sync_receiver.is_some());
+        app.handle_key(KeyCode::Char('r'))?;
+        assert!(matches!(app.mode, Mode::Browse));
+        assert!(!app.handle_key(KeyCode::Char('q'))?);
+        app.handle_key(KeyCode::Char('1'))?;
+        wait_for_sync(&mut app);
+        assert_eq!(app.tasks[0].title, "remote task", "{}", app.message);
+        assert!(!app.uncommitted_changes);
+        assert!(app.message.contains("pulled and applied"));
+        app.handle_key(KeyCode::Char('3'))?;
+        app.handle_key(KeyCode::Char('p'))?;
+        wait_for_sync(&mut app);
+        assert_eq!(app.message, "Todo checkpoints pushed");
+        app.handle_key(KeyCode::Char('1'))?;
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Char('x'))?;
+        app.handle_key(KeyCode::Enter)?;
+        app.handle_key(KeyCode::Char('3'))?;
+        app.handle_key(KeyCode::Char('P'))?;
+        assert!(app.sync_receiver.is_none());
+        assert!(app.message.contains("Commit your todo changes"));
+        db::delete_task(&app.db, app.db.last_insert_rowid())?;
+        app.update_commit_status();
+        db::save_task(&publisher_db, None, "new remote task")?;
+        publisher.commit(&publisher_db, "second checkpoint")?;
+        publisher.push()?;
+        app.handle_key(KeyCode::Char('P'))?;
+        app.handle_key(KeyCode::Char('1'))?;
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Char('y'))?;
+        app.handle_key(KeyCode::Enter)?;
+        wait_for_sync(&mut app);
+        assert!(
+            app.message.contains("changed during pull"),
+            "{}",
+            app.message
+        );
+        assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 2);
+        assert_eq!(app.commits.len(), 1);
+        app.handle_key(KeyCode::Char('3'))?;
+        app.handle_key(KeyCode::Char('r'))?;
+        app.handle_key(KeyCode::Esc)?;
+        assert!(!app.remote_url.is_empty());
+        app.mode = Mode::RemoteEdit(String::new());
+        app.handle_key(KeyCode::Enter)?;
+        assert!(app.remote_url.is_empty());
+        app.handle_key(KeyCode::Char('p'))?;
+        wait_for_sync(&mut app);
+        assert!(app.message.contains("Configure origin"));
+        drop(app);
+        drop(publisher_db);
+        fs::remove_dir_all(root)?;
         Ok(())
     }
 

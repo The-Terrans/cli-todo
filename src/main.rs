@@ -6,7 +6,7 @@ mod ui;
 use app::App;
 use crossterm::event::{self, Event};
 use ratatui::DefaultTerminal;
-use std::{env, error::Error, fs, path::PathBuf};
+use std::{env, error::Error, fs, path::PathBuf, time::Duration};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -36,7 +36,11 @@ fn run(app: &mut App) -> Result<()> {
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
+        app.poll_sync();
         terminal.draw(|frame| ui::draw(frame, app))?;
+        if !event::poll(Duration::from_millis(100))? {
+            continue;
+        }
         if let Event::Key(key) = event::read()? {
             if app.handle_key_event(key)? {
                 return Ok(());

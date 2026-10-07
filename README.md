@@ -28,6 +28,8 @@ Without Nix, install Git, a Rust toolchain, pkg-config, and SQLite development l
 | d                            | Request task/project deletion in its section              |
 | m in Tasks                   | Move task to Inbox or a project; arrows and Enter choose  |
 | c in Commits                 | Enter a message and commit a safe todo SQLite snapshot    |
+| r in Commits                 | Set/change origin URL; empty input removes it             |
+| p / P in Commits             | Push checkpoints / safely pull and apply a snapshot       |
 | y / Enter in deletion dialog | Confirm permanent deletion                               |
 | n / Esc in deletion dialog   | Cancel deletion                                          |
 | Enter in text entry          | Save title (empty/whitespace-only titles rejected)       |
@@ -52,9 +54,20 @@ New tasks belong to the open project; press **1** to return to Inbox for unassig
 
 Git must have a configured author identity (`user.name` and `user.email`). Git errors stay in the dialog so you can cancel or retry; the live database is not modified by committing.
 
-Each checkpoint uses SQLite `VACUUM INTO` to make a consistent snapshot while the app runs. Only the snapshot is committed to a dedicated repository at `$XDG_DATA_HOME/cli-todo/history/` (or `$HOME/.local/share/cli-todo/history/`). Its tracked file is `tasks.sqlite3`. All tasks and projects are included; unchanged snapshots do not create another commit. This repository is initialized on the first checkpoint.
+Each checkpoint uses SQLite `VACUUM INTO` to make a consistent snapshot while the app runs. Only the snapshot is committed to a dedicated repository at `$XDG_DATA_HOME/cli-todo/history/` (or `$HOME/.local/share/cli-todo/history/`). Its tracked file is `tasks.sqlite3`. All tasks and projects are included; unchanged snapshots do not create another commit. This repository is initialized on the first checkpoint or remote setup. New repositories use the main branch.
 
-Up/Down selects a commit and immediately previews its Git details on the right: hash, author, timestamps, message, and binary file statistics. Enter or **0** focuses the details; Up/Down scrolls, Esc returns to Commits. History remains available across app restarts. There is no JSON conversion, readable task diff, automatic commit, restore, or push action. Snapshots contain your private todo data; review before sharing the history repository.
+Up/Down selects a commit and immediately previews its Git details on the right: hash, author, timestamps, message, and binary file statistics. Enter or **0** focuses the details; Up/Down scrolls, Esc returns to Commits. History remains available across app restarts. There is no JSON conversion, readable task diff, automatic commit, or arbitrary historical restore action. Snapshots contain your private todo data; review before sharing the history repository.
+
+## Remote backup and sync
+
+Create an empty **private** GitHub repository, then press **3 → r**, enter its SSH or HTTPS URL, and press Enter. **r** also changes origin; erase the URL and save to remove it. Removing origin does not delete local checkpoints. The configured URL appears in the right preview.
+
+- **p: Push** uploads committed snapshots only, even if newer tasks are uncommitted. It never force-pushes.
+- **P: Pull** fetches remote history and applies its latest SQLite snapshot only when local todo data and Git files are clean and history can fast-forward. Local-ahead history is left alone; divergent history is refused.
+- Before replacement, the snapshot is checked for SQLite integrity, compatible tables, and project references. The live database is backed up to `cli-todo/backups/before-pull-<timestamp>.sqlite3`. If Git integration fails, the original database is restored from that backup.
+- Git authentication must already work outside the app (SSH keys or your Git credential manager). The app does not store tokens or prompt for passwords. Do not embed tokens in the remote URL.
+
+Sync runs in the background; progress and errors appear in the footer. You can navigate while syncing, but checkpoints, remote changes, and quitting wait for completion. Pull checks again before applying: task changes made during download, or an open editing dialog, prevent replacement. Close other app instances before pulling. A fresh empty database can pull existing history without creating a local checkpoint first. GitHub access is optional; normal task operations remain local.
 
 ## Command palette
 
@@ -64,7 +77,7 @@ Actions: add, edit selected task, complete/reopen selected task, delete selected
 
 ## Storage
 
-Tasks save immediately to `$XDG_DATA_HOME/cli-todo/tasks.sqlite3` when `XDG_DATA_HOME` is absolute. Otherwise they use `$HOME/.local/share/cli-todo/tasks.sqlite3`. The directory is created automatically. No network, accounts, tags, priorities, or dates.
+Tasks save immediately to `$XDG_DATA_HOME/cli-todo/tasks.sqlite3` when `XDG_DATA_HOME` is absolute. Otherwise they use `$HOME/.local/share/cli-todo/tasks.sqlite3`. The directory is created automatically. No app accounts, tags, priorities, or dates. Network access occurs only for explicit Git Push/Pull.
 
 Quit before copying the database for backup. Database errors exit with an error after restoring the terminal; failed changes are not reported as saved.
 
@@ -79,6 +92,8 @@ cargo clippy -- -D warnings
 cargo build
 python3 tests/smoke.py
 ```
+
+Unit tests verify Push/Pull against temporary local Git remotes, including dirty-data refusal, divergence, malformed snapshots, and rollback after an injected Git failure. These checks do not contact GitHub.
 
 The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, SQLite checkpoints and persisted Git history, add/edit/complete/delete, cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
 

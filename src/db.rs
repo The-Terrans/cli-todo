@@ -2,7 +2,7 @@ use crate::Result;
 use rusqlite::{params, Connection};
 use std::path::Path;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Task {
     pub id: i64,
     pub title: String,
@@ -10,6 +10,7 @@ pub struct Task {
     pub project_id: Option<i64>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Project {
     pub id: i64,
     pub name: String,

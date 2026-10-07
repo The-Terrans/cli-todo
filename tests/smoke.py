@@ -122,6 +122,26 @@ with tempfile.TemporaryDirectory() as data:
         send(b"1\r ")
         send(b"3csecond checkpoint\r")
         assert subprocess.check_output(["git", "-C", str(history), "rev-list", "--count", "HEAD"]).strip() == b"2"
+        remote = Path(data) / "remote.git"
+        branch = subprocess.check_output(["git", "-C", str(history), "symbolic-ref", "--short", "HEAD"]).decode().strip()
+        subprocess.run(["git", "init", "--bare", "--quiet", f"--initial-branch={branch}", str(remote)], check=True)
+        send(b"r" + str(remote).encode() + b"\r")
+        assert subprocess.check_output(["git", "-C", str(history), "remote", "get-url", "origin"]).decode().strip() == str(remote)
+        send(b"p")
+        deadline = time.monotonic() + 5
+        head = subprocess.check_output(["git", "-C", str(history), "rev-parse", "HEAD"]).strip()
+        while True:
+            published = subprocess.run(["git", "-C", str(remote), "rev-parse", "--verify", "HEAD"], capture_output=True)
+            if published.returncode == 0 and published.stdout.strip() == head:
+                break
+            assert time.monotonic() < deadline, "push did not publish todo checkpoints"
+            time.sleep(0.05)
+        screen()
+        deadline = time.monotonic() + 5
+        output = send(b"P")
+        while b"up to date" not in output:
+            assert time.monotonic() < deadline, "pull did not finish"
+            output += screen()
         send(b"q")
         finish(0)
         proc, master, slave, before = launch()
@@ -134,7 +154,7 @@ with tempfile.TemporaryDirectory() as data:
         assert b"smoke forced error" in output
         finish(1)
         assert rows() == [("preserved", 0)]
-        print("PASS: PTY navigation, command palette search/actions, CRUD, persistence, normal/error terminal restoration")
+        print("PASS: PTY navigation, palette, projects, checkpoints, remote setup/push/pull, persistence, terminal restoration")
     finally:
         if proc.poll() is None:
             proc.kill()
