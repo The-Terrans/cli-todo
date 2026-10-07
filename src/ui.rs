@@ -17,18 +17,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
     ])
     .split(areas[0]);
     let sections = Layout::vertical([
-        Constraint::Length(FILTERS.len() as u16 + 2),
-        Constraint::Length(1),
-        Constraint::Length(
-            (app.projects.len().max(1) as u16 + 2).min(panels[0].height.saturating_sub(7) / 2),
-        ),
-        Constraint::Length(1),
-        Constraint::Min(0),
+        Constraint::Fill(1),
+        Constraint::Fill(1),
+        Constraint::Fill(1),
     ])
     .split(panels[0]);
     draw_navigation(frame, sections[0], app);
-    draw_projects(frame, sections[2], app);
-    draw_commits(frame, sections[4], app);
+    draw_projects(frame, sections[1], app);
+    draw_commits(frame, sections[2], app);
     if app.commits_focused {
         draw_commit_details(frame, panels[2], app);
     } else {
@@ -57,10 +53,6 @@ fn selection_style() -> Style {
 }
 
 fn draw_navigation(frame: &mut Frame, area: Rect, app: &App) {
-    let area = Rect {
-        height: area.height.min(FILTERS.len() as u16 + 2),
-        ..area
-    };
     let active = matches!(app.mode, Mode::Browse)
         && app.navigation_focused
         && !app.projects_focused
@@ -85,10 +77,6 @@ fn draw_navigation(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_projects(frame: &mut Frame, area: Rect, app: &App) {
-    let area = Rect {
-        height: area.height.min(app.projects.len().max(1) as u16 + 2),
-        ..area
-    };
     let active = matches!(app.mode, Mode::Browse) && app.navigation_focused && app.projects_focused;
     let mut state = ListState::default()
         .with_selected((active && !app.projects.is_empty()).then_some(app.selected_project));
@@ -116,10 +104,6 @@ fn draw_projects(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_commits(frame: &mut Frame, area: Rect, app: &App) {
-    let area = Rect {
-        height: area.height.min(app.commits.len().max(1) as u16 + 2),
-        ..area
-    };
     let active = matches!(app.mode, Mode::Browse) && app.navigation_focused && app.commits_focused;
     let mut state = ListState::default()
         .with_selected((active && !app.commits.is_empty()).then_some(app.selected_commit));
@@ -340,7 +324,7 @@ mod tests {
         db::create_task(&db, "project task", Some(project))?;
         db::save_task(&db, None, "inbox task")?;
         let mut app = App::new(db)?;
-        let mut terminal = Terminal::new(TestBackend::new(100, 24))?;
+        let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
         for key in ['1', '2', '0'] {
             app.handle_key_event(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE))?;
             terminal.draw(|frame| draw(frame, &app))?;
@@ -354,7 +338,10 @@ mod tests {
             assert_eq!(highlighted_rows, 1, "section {key}");
             let buffer = terminal.backend().buffer();
             assert_eq!(buffer[(3, 1)].symbol(), "A", "Inbox indent changed");
-            assert_eq!(buffer[(3, 7)].symbol(), "W", "Projects indent changed");
+            assert_eq!(buffer[(3, 9)].symbol(), "W", "Projects indent changed");
+            for bottom in [7, 15, 23] {
+                assert_eq!(buffer[(0, bottom)].symbol(), "╰", "Uneven section heights");
+            }
             assert_eq!(buffer[(28, 1)].symbol(), "[", "Tasks indent changed");
         }
         Ok(())
