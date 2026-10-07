@@ -19,12 +19,21 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let sections = Layout::vertical([
         Constraint::Length(FILTERS.len() as u16 + 2),
         Constraint::Length(1),
+        Constraint::Length(
+            (app.projects.len().max(1) as u16 + 2).min(panels[0].height.saturating_sub(7) / 2),
+        ),
+        Constraint::Length(1),
         Constraint::Min(0),
     ])
     .split(panels[0]);
     draw_navigation(frame, sections[0], app);
     draw_projects(frame, sections[2], app);
-    draw_tasks(frame, panels[2], app);
+    draw_commits(frame, sections[4], app);
+    if app.commits_focused {
+        draw_commit_details(frame, panels[2], app);
+    } else {
+        draw_tasks(frame, panels[2], app);
+    }
     draw_help(frame, areas[1]);
     draw_dialog(frame, app);
 }
@@ -52,8 +61,10 @@ fn draw_navigation(frame: &mut Frame, area: Rect, app: &App) {
         height: area.height.min(FILTERS.len() as u16 + 2),
         ..area
     };
-    let active =
-        matches!(app.mode, Mode::Browse) && app.navigation_focused && !app.projects_focused;
+    let active = matches!(app.mode, Mode::Browse)
+        && app.navigation_focused
+        && !app.projects_focused
+        && !app.commits_focused;
     let mut state = ListState::default().with_selected(active.then_some(app.selected_filter));
     let filters = FILTERS.iter().map(|(label, _)| *label);
     frame.render_stateful_widget(
@@ -62,7 +73,7 @@ fn draw_navigation(frame: &mut Frame, area: Rect, app: &App) {
             .block(
                 panel(
                     "─[1]─Inbox",
-                    app.navigation_focused && !app.projects_focused,
+                    app.navigation_focused && !app.projects_focused && !app.commits_focused,
                 )
                 .border_type(BorderType::Rounded),
             )
@@ -104,6 +115,60 @@ fn draw_projects(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
+fn draw_commits(frame: &mut Frame, area: Rect, app: &App) {
+    let area = Rect {
+        height: area.height.min(app.commits.len().max(1) as u16 + 2),
+        ..area
+    };
+    let active = matches!(app.mode, Mode::Browse) && app.navigation_focused && app.commits_focused;
+    let mut state = ListState::default()
+        .with_selected((active && !app.commits.is_empty()).then_some(app.selected_commit));
+    let title = if app.uncommitted_changes {
+        "─[3]─Commits* "
+    } else {
+        "─[3]─Commits "
+    };
+    let items = app.commits.iter().map(|commit| {
+        format!(
+            "{} {}",
+            &commit.hash[..7.min(commit.hash.len())],
+            commit.subject
+        )
+    });
+    frame.render_stateful_widget(
+        List::new(items)
+            .highlight_spacing(HighlightSpacing::Always)
+            .block(
+                panel(title, app.navigation_focused && app.commits_focused)
+                    .border_type(BorderType::Rounded),
+            )
+            .highlight_style(selection_style())
+            .highlight_symbol("> "),
+        area,
+        &mut state,
+    );
+    if app.commits.is_empty() {
+        frame.render_widget(
+            Paragraph::new("3 → c: checkpoint"),
+            area.inner(Margin::new(1, 1)),
+        );
+    }
+}
+
+fn draw_commit_details(frame: &mut Frame, area: Rect, app: &App) {
+    let text = if app.message.is_empty() {
+        app.commit_details.clone()
+    } else {
+        format!("{}\n\n{}", app.message, app.commit_details)
+    };
+    frame.render_widget(
+        Paragraph::new(text).scroll((app.detail_scroll, 0)).block(
+            panel("─[0]─Commit details", !app.navigation_focused).border_type(BorderType::Rounded),
+        ),
+        area,
+    );
+}
+
 fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
     let items = app.tasks.iter().map(|task| {
         ListItem::new(format!(
@@ -142,8 +207,8 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_help(frame: &mut Frame, area: Rect) {
     frame.render_widget(
         Paragraph::new(concat!(
-            "0/1/2: section | Arrows: move | Enter: open | a: add | e: edit | ",
-            "Space: complete | m: move | d: delete | Esc: back/cancel | q: quit | ",
+            "0/1/2/3: section | Arrows: move | Enter: open | a: add | e: edit | ",
+            "Space: complete | m: move | c: checkpoint | d: delete | Esc: back/cancel | q: quit | ",
             "Ctrl+K: search tasks/actions",
         )),
         area,
@@ -155,6 +220,10 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
         Mode::Browse => return,
         Mode::Palette { .. } => return draw_palette(frame, app),
         Mode::Move { .. } => return draw_move_dialog(frame, app),
+        Mode::CommitEdit(text) => (
+            " Commit todo snapshot ",
+            format!("{text}▏\nEnter: commit SQLite snapshot · Esc: cancel\n{}", app.message),
+        ),
         Mode::ProjectEdit(id, text) => (
             if id.is_some() { " Rename project " } else { " Add project " },
             format!("{text}▏\nEnter: save · Esc: cancel\n{}", app.message),

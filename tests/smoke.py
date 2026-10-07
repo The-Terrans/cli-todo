@@ -25,7 +25,10 @@ with tempfile.TemporaryDirectory() as data:
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
         before = termios.tcgetattr(slave)
         proc = subprocess.Popen([binary], stdin=slave, stdout=slave, stderr=slave,
-                                env={**os.environ, "TERM": "xterm-256color", "XDG_DATA_HOME": data})
+                                env={**os.environ, "TERM": "xterm-256color", "XDG_DATA_HOME": data,
+                                     "GIT_AUTHOR_NAME": "Todo Test", "GIT_AUTHOR_EMAIL": "todo@example.test",
+                                     "GIT_COMMITTER_NAME": "Todo Test", "GIT_COMMITTER_EMAIL": "todo@example.test",
+                                     "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "commit.gpgsign", "GIT_CONFIG_VALUE_0": "false"})
         return proc, master, slave, before
 
     def screen():
@@ -48,7 +51,7 @@ with tempfile.TemporaryDirectory() as data:
     proc, master, slave, before = launch()
     try:
         first = screen()
-        assert b"Inbox" in first and b"Tasks" in first and b"0/1/2: section" in first
+        assert b"Inbox" in first and b"Tasks" in first and b"0/1/2/3: section" in first
         assert b"Title cannot be empty" in send(b"a\r")
         send(b"first\r")
         assert rows() == [("first", 0)]
@@ -102,6 +105,29 @@ with tempfile.TemporaryDirectory() as data:
         send(b"dy")
         assert rows() == []
         send(b"1apreserved\r")
+        assert b"No todo commits" in send(b"3")
+        assert b"Commit message cannot be empty" in send(b"c\r")
+        send(b"\x1b")
+        committed = send(b"cfirst checkpoint\r")
+        assert b"snapshot committed" in committed
+        assert b"Author:" in committed
+        notification = send(b"c")
+        assert b"changes to commit" in notification, notification
+        assert subprocess.check_output(["git", "-C", str(dbpath.parent / "history"), "rev-list", "--count", "HEAD"]).strip() == b"1"
+        history = dbpath.parent / "history"
+        with sqlite3.connect(history / "tasks.sqlite3") as snapshot:
+            assert snapshot.execute("SELECT title,done FROM tasks").fetchall() == [("preserved", 0)]
+        send(b"\r")
+        send(b"\x1b")
+        send(b"1\r ")
+        send(b"3csecond checkpoint\r")
+        assert subprocess.check_output(["git", "-C", str(history), "rev-list", "--count", "HEAD"]).strip() == b"2"
+        send(b"q")
+        finish(0)
+        proc, master, slave, before = launch()
+        screen()
+        assert b"second checkpoint" in send(b"3")
+        send(b"1\r ")
         with sqlite3.connect(dbpath) as db:
             db.execute("CREATE TRIGGER fail_insert BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT, 'smoke forced error'); END")
         output = send(b"afailure\r")

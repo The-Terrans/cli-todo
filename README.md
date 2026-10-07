@@ -1,6 +1,6 @@
 # cli-todo
 
-A local Rust terminal todo app using Ratatui and SQLite. Inbox and projects in the left panel, tasks in the right panel, keyboard-only controls.
+A local Rust terminal todo app using Ratatui and SQLite. Inbox, projects, and todo commits in the left panel; task or commit previews in the right panel, keyboard-only controls.
 
 ## Run
 
@@ -9,17 +9,17 @@ nix develop path:./.nix
 cargo run
 ```
 
-If flakes are not enabled, use `nix --extra-experimental-features 'nix-command flakes' develop path:./.nix` instead. The explicit `path:` snapshots only `.nix/`, not the surrounding Git repository. First use downloads dependencies. The flake provides a development shell (not a `nix run` package), with Rust, Cargo, rustfmt, Clippy, pkg-config, and SQLite. `.nix/flake.lock` pins Nix dependencies; `Cargo.lock` pins Rust dependencies.
+If flakes are not enabled, use `nix --extra-experimental-features 'nix-command flakes' develop path:./.nix` instead. The explicit `path:` snapshots only `.nix/`, not the surrounding Git repository. First use downloads dependencies. The flake provides a development shell (not a `nix run` package), with Rust, Cargo, rustfmt, Clippy, pkg-config, and SQLite. Install Git separately for todo checkpoints. `.nix/flake.lock` pins Nix dependencies; `Cargo.lock` pins Rust dependencies.
 
-Without Nix, install a Rust toolchain, pkg-config, and SQLite development libraries, then run `cargo run`. Build without launching with `cargo build`.
+Without Nix, install Git, a Rust toolchain, pkg-config, and SQLite development libraries, then run `cargo run`. Build without launching with `cargo build`.
 
 ## Controls
 
 | Key                          | Action                                                   |
 | ---------------------------- | -------------------------------------------------------- |
 | Esc while browsing           | Return from Tasks to its navigation section; no effect on left           |
-| 0 / 1 / 2 while browsing     | Focus Tasks / Inbox / Projects directly                   |
-| Left / Right in left panel   | Cycle Inbox ↔ Projects with wraparound; no effect in Tasks                |
+| 0 / 1 / 2 / 3 while browsing | Focus right preview / Inbox / Projects / Commits          |
+| Left / Right in left panel   | Cycle Inbox → Projects → Commits with wraparound; left reverses                |
 | Up / Down                    | Choose Inbox filter in navigation, or task in main panel |
 | Enter                        | Open Inbox filter / edit selected task                   |
 | a                            | Add task; in Projects section, add project                |
@@ -27,6 +27,7 @@ Without Nix, install a Rust toolchain, pkg-config, and SQLite development librar
 | Space                        | Toggle completion in main panel                          |
 | d                            | Request task/project deletion in its section              |
 | m in Tasks                   | Move task to Inbox or a project; arrows and Enter choose  |
+| c in Commits                 | Enter a message and commit a safe todo SQLite snapshot    |
 | y / Enter in deletion dialog | Confirm permanent deletion                               |
 | n / Esc in deletion dialog   | Cancel deletion                                          |
 | Enter in text entry          | Save title (empty/whitespace-only titles rejected)       |
@@ -44,6 +45,16 @@ The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to
 New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** from Tasks returns to its navigation section. Tab remains disabled.
 
 **Deleting a project permanently deletes all its tasks**, after explicit confirmation. Esc/n cancels. Existing databases migrate automatically, preserving old tasks in Inbox.
+
+## Todo commits
+
+**[3] Commits** is below Projects. It tracks todo data, not the app source or current working directory. Press **3**, then **c**, type a message, and press **Enter**. Esc cancels; blank messages are rejected. A **\*** beside Commits means there are uncommitted todo changes. The marker updates after task/project changes, when opening Commits, and on restart; it disappears after a successful checkpoint. Pressing **c** without changes shows **“No todo changes to commit”** instead of opening a message dialog. An empty database with no history is considered unchanged.
+
+Git must have a configured author identity (`user.name` and `user.email`). Git errors stay in the dialog so you can cancel or retry; the live database is not modified by committing.
+
+Each checkpoint uses SQLite `VACUUM INTO` to make a consistent snapshot while the app runs. Only the snapshot is committed to a dedicated repository at `$XDG_DATA_HOME/cli-todo/history/` (or `$HOME/.local/share/cli-todo/history/`). Its tracked file is `tasks.sqlite3`. All tasks and projects are included; unchanged snapshots do not create another commit. This repository is initialized on the first checkpoint.
+
+Up/Down selects a commit and immediately previews its Git details on the right: hash, author, timestamps, message, and binary file statistics. Enter or **0** focuses the details; Up/Down scrolls, Esc returns to Commits. History remains available across app restarts. There is no JSON conversion, readable task diff, automatic commit, restore, or push action. Snapshots contain your private todo data; review before sharing the history repository.
 
 ## Command palette
 
@@ -69,6 +80,6 @@ cargo build
 python3 tests/smoke.py
 ```
 
-The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, add/edit/complete/delete, cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
+The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, SQLite checkpoints and persisted Git history, add/edit/complete/delete, cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
 
 Verified in this workspace: Nix shell (Cargo 1.98.0, Rust 1.98.1, SQLite 3.53.3), formatting, unit test, Clippy, build, and PTY smoke test passed.

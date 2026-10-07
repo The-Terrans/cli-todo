@@ -1,5 +1,6 @@
 mod app;
 mod db;
+mod history;
 mod ui;
 
 use app::App;

@@ -1,5 +1,6 @@
 use crate::{
     db::{self, Filter, Project, Task},
+    history::{Commit, History},
     Result,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -42,6 +43,7 @@ pub enum Mode {
     Palette { query: String, selected: usize },
     ProjectEdit(Option<i64>, String),
     ProjectDelete(i64),
+    CommitEdit(String),
     Move { task: i64, selected: usize },
 }
 
@@ -53,6 +55,13 @@ pub struct App {
     pub selected_project: usize,
     pub current_project: Option<i64>,
     pub projects_focused: bool,
+    pub commits_focused: bool,
+    pub uncommitted_changes: bool,
+    history: Option<History>,
+    pub commits: Vec<Commit>,
+    pub selected_commit: usize,
+    pub commit_details: String,
+    pub detail_scroll: u16,
     pub selected_task: usize,
     pub navigation_focused: bool,
     pub selected_filter: usize,
@@ -69,6 +78,13 @@ impl App {
             selected_project: 0,
             current_project: None,
             projects_focused: false,
+            commits_focused: false,
+            uncommitted_changes: false,
+            history: History::new(&db),
+            commits: vec![],
+            selected_commit: 0,
+            commit_details: String::new(),
+            detail_scroll: 0,
             selected_task: 0,
             navigation_focused: true,
             selected_filter: 0,
@@ -77,6 +93,8 @@ impl App {
             db,
         };
         app.refresh_tasks()?;
+        app.reload_commits();
+        app.update_commit_status();
         Ok(app)
     }
 
@@ -111,6 +129,15 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyCode) -> Result<bool> {
+        let changes = self.db.total_changes();
+        let result = self.dispatch_key(key);
+        if self.db.total_changes() != changes {
+            self.update_commit_status();
+        }
+        result
+    }
+
+    fn dispatch_key(&mut self, key: KeyCode) -> Result<bool> {
         self.message.clear();
         if key == KeyCode::Char('q') && matches!(self.mode, Mode::Browse | Mode::Delete(_)) {
             return self.execute_action(Action::Quit);
@@ -122,6 +149,7 @@ impl App {
             Mode::Palette { .. } => return self.handle_palette_key(key),
             Mode::ProjectEdit(..) => self.handle_project_edit_key(key)?,
             Mode::ProjectDelete(id) => self.handle_project_delete_key(key, id)?,
+            Mode::CommitEdit(_) => self.handle_commit_edit_key(key)?,
             Mode::Move { .. } => self.handle_move_key(key)?,
         }
         Ok(false)
@@ -131,15 +159,11 @@ impl App {
         match key {
             KeyCode::Char('0') => self.navigation_focused = false,
             KeyCode::Char('1') => self.focus_inbox()?,
-            KeyCode::Left | KeyCode::Right if self.navigation_focused => {
-                if self.projects_focused {
-                    self.focus_inbox()?;
-                } else {
-                    self.focus_projects()?;
-                }
-            }
+            KeyCode::Left | KeyCode::Right if self.navigation_focused => self.cycle_section(key)?,
             KeyCode::Char('2') => self.focus_projects()?,
+            KeyCode::Char('3') => self.focus_commits(),
             KeyCode::Esc => self.navigation_focused = true,
+            _ if self.commits_focused => self.handle_commit_key(key),
             _ if self.navigation_focused && self.projects_focused => {
                 self.handle_project_key(key)?
             }
@@ -155,6 +179,7 @@ impl App {
     fn focus_inbox(&mut self) -> Result<()> {
         self.navigation_focused = true;
         self.projects_focused = false;
+        self.commits_focused = false;
         self.current_project = None;
         self.refresh_tasks()
     }
@@ -162,7 +187,164 @@ impl App {
     fn focus_projects(&mut self) -> Result<()> {
         self.navigation_focused = true;
         self.projects_focused = true;
+        self.commits_focused = false;
         self.preview_project()
+    }
+
+    fn cycle_section(&mut self, key: KeyCode) -> Result<()> {
+        let section = if self.commits_focused {
+            2
+        } else if self.projects_focused {
+            1
+        } else {
+            0
+        };
+        let next = (section + if key == KeyCode::Right { 1 } else { 2 }) % 3;
+        match next {
+            0 => self.focus_inbox()?,
+            1 => self.focus_projects()?,
+            _ => self.focus_commits(),
+        }
+        Ok(())
+    }
+
+    fn focus_commits(&mut self) {
+        self.navigation_focused = true;
+        self.projects_focused = false;
+        self.commits_focused = true;
+        self.reload_commits();
+        self.update_commit_status();
+    }
+
+    fn update_commit_status(&mut self) -> bool {
+        let result = match &self.history {
+            Some(history) => history.has_changes(&self.db),
+            None => Ok(true),
+        };
+        match result {
+            Ok(changed) => {
+                self.uncommitted_changes = changed;
+                true
+            }
+            Err(error) => {
+                self.uncommitted_changes = true;
+                self.message = format!("Could not check todo changes: {error}");
+                false
+            }
+        }
+    }
+
+    fn begin_commit(&mut self) {
+        if !self.update_commit_status() {
+            return;
+        }
+        if self.uncommitted_changes {
+            self.mode = Mode::CommitEdit(String::new());
+        } else {
+            self.message = "No todo changes to commit".into();
+        }
+    }
+
+    fn reload_commits(&mut self) {
+        let result = self
+            .history
+            .as_ref()
+            .ok_or("Todo history requires a file-backed database")
+            .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+            .and_then(History::list);
+        match result {
+            Ok(commits) => {
+                self.commits = commits;
+                self.selected_commit = self
+                    .selected_commit
+                    .min(self.commits.len().saturating_sub(1));
+                self.preview_commit();
+            }
+            Err(error) => self.commit_details = format!("Could not load todo history: {error}"),
+        }
+    }
+
+    fn preview_commit(&mut self) {
+        self.detail_scroll = 0;
+        self.commit_details = match (
+            self.history.as_ref(),
+            self.commits.get(self.selected_commit),
+        ) {
+            (Some(history), Some(commit)) => history
+                .details(&commit.hash)
+                .unwrap_or_else(|error| format!("Could not read commit: {error}")),
+            _ => "No todo commits yet. Press c in [3] Commits to create a SQLite snapshot.".into(),
+        };
+    }
+
+    fn handle_commit_key(&mut self, key: KeyCode) {
+        if !self.navigation_focused {
+            match key {
+                KeyCode::Up => self.detail_scroll = self.detail_scroll.saturating_sub(1),
+                KeyCode::Down => {
+                    self.detail_scroll = (self.detail_scroll + 1).min(
+                        self.commit_details
+                            .lines()
+                            .count()
+                            .saturating_sub(1)
+                            .min(u16::MAX as usize) as u16,
+                    )
+                }
+                _ => {}
+            }
+            return;
+        }
+        match key {
+            KeyCode::Char('c') => self.begin_commit(),
+            KeyCode::Up => {
+                self.selected_commit = self.selected_commit.saturating_sub(1);
+                self.preview_commit();
+            }
+            KeyCode::Down => {
+                self.selected_commit =
+                    (self.selected_commit + 1).min(self.commits.len().saturating_sub(1));
+                self.preview_commit();
+            }
+            KeyCode::Enter => self.navigation_focused = false,
+            _ => {}
+        }
+    }
+
+    fn handle_commit_edit_key(&mut self, key: KeyCode) -> Result<()> {
+        let Mode::CommitEdit(text) = &mut self.mode else {
+            return Ok(());
+        };
+        match key {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            KeyCode::Char(character) => text.push(character),
+            KeyCode::Enter => self.save_commit(),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn save_commit(&mut self) {
+        let Mode::CommitEdit(message) = &self.mode else {
+            return;
+        };
+        let result = match &self.history {
+            Some(history) => history.commit(&self.db, message),
+            None => Err("Todo history requires a file-backed database".into()),
+        };
+        match result {
+            Ok(message) => {
+                self.mode = Mode::Browse;
+                self.selected_commit = 0;
+                self.reload_commits();
+                if self.update_commit_status() {
+                    self.message = message;
+                }
+            }
+            Err(error) => self.message = error.to_string(),
+        }
     }
 
     fn preview_project(&mut self) -> Result<()> {
@@ -216,7 +398,12 @@ impl App {
 
     fn execute_action(&mut self, action: Action) -> Result<bool> {
         match action {
-            Action::Add => self.mode = Mode::Edit(None, String::new()),
+            Action::Add => {
+                if self.commits_focused {
+                    self.focus_inbox()?;
+                }
+                self.mode = Mode::Edit(None, String::new());
+            }
             Action::Edit => {
                 if let Some(task) = self.tasks.get(self.selected_task) {
                     self.mode = Mode::Edit(Some(task.id), task.title.clone());
@@ -242,10 +429,14 @@ impl App {
                 }
             }
             Action::ShowFilter(filter) => {
+                if self.commits_focused {
+                    self.focus_inbox()?;
+                }
                 self.select_filter(filter)?;
                 self.navigation_focused = false;
             }
             Action::OpenTask(id) => {
+                self.commits_focused = false;
                 if let Some(task) = self.palette_tasks.iter().find(|task| task.id == id) {
                     self.current_project = task.project_id;
                     self.projects_focused = task.project_id.is_some();
@@ -288,7 +479,7 @@ impl App {
             return vec![];
         };
         let query = query.trim().to_lowercase();
-        let has_task = self.tasks.get(self.selected_task).is_some();
+        let has_task = !self.commits_focused && self.tasks.get(self.selected_task).is_some();
         ACTIONS
             .iter()
             .copied()
@@ -531,6 +722,86 @@ mod tests {
                 !app.handle_key_event(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))?
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn commit_marker_and_no_changes_notification_follow_database_changes() -> Result<()> {
+        use std::{env, fs, process::Command, time::SystemTime};
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_nanos();
+        let root = env::temp_dir().join(format!("cli-todo-status-{stamp}"));
+        fs::create_dir_all(&root)?;
+        let path = root.join("tasks.sqlite3");
+        let mut app = App::new(db::open(&path)?)?;
+        assert!(!app.uncommitted_changes);
+        app.handle_key(KeyCode::Char('3'))?;
+        app.handle_key(KeyCode::Char('c'))?;
+        assert!(matches!(app.mode, Mode::Browse));
+        assert_eq!(app.message, "No todo changes to commit");
+        app.handle_key(KeyCode::Char('1'))?;
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Char('x'))?;
+        app.handle_key(KeyCode::Enter)?;
+        assert!(app.uncommitted_changes);
+        let history = root.join("history");
+        fs::create_dir_all(&history)?;
+        for args in [
+            vec!["init", "--quiet"],
+            vec!["config", "user.name", "Todo Test"],
+            vec!["config", "user.email", "todo@example.test"],
+            vec!["config", "commit.gpgsign", "false"],
+        ] {
+            assert!(Command::new("git")
+                .arg("-C")
+                .arg(&history)
+                .args(args)
+                .output()?
+                .status
+                .success());
+        }
+        app.handle_key(KeyCode::Char('3'))?;
+        app.handle_key(KeyCode::Char('c'))?;
+        app.handle_key(KeyCode::Char('m'))?;
+        app.handle_key(KeyCode::Enter)?;
+        assert!(matches!(app.mode, Mode::Browse), "{}", app.message);
+        assert!(!app.uncommitted_changes);
+        app.handle_key(KeyCode::Char('c'))?;
+        assert_eq!(app.message, "No todo changes to commit");
+        assert_eq!(app.commits.len(), 1);
+        drop(app);
+        let mut app = App::new(db::open(&path)?)?;
+        assert!(!app.uncommitted_changes);
+        assert_eq!(app.commits.len(), 1);
+        assert!(!app.commits_focused);
+        app.handle_key(KeyCode::Enter)?;
+        app.handle_key(KeyCode::Char(' '))?;
+        assert!(app.uncommitted_changes);
+        drop(app);
+        let app = App::new(db::open(&path)?)?;
+        assert!(app.uncommitted_changes);
+        drop(app);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn commit_dialog_preserves_text_and_handles_errors_without_exiting() -> Result<()> {
+        let mut app = app()?;
+        app.handle_key(KeyCode::Char('3'))?;
+        assert!(app.commits_focused);
+        app.handle_key(KeyCode::Char('c'))?;
+        assert!(!app.handle_key(KeyCode::Char('q'))?);
+        app.handle_key(KeyCode::Enter)?;
+        assert!(matches!(&app.mode, Mode::CommitEdit(text) if text == "q"));
+        assert!(app.message.contains("file-backed"));
+        app.handle_key(KeyCode::Esc)?;
+        assert!(matches!(app.mode, Mode::Browse));
+        app.handle_key(KeyCode::Enter)?;
+        assert!(!app.navigation_focused);
+        app.handle_key(KeyCode::Esc)?;
+        assert!(app.navigation_focused && app.commits_focused);
         Ok(())
     }
 
@@ -835,10 +1106,13 @@ mod tests {
         let mut app = app()?;
         let filter = app.selected_filter;
         for key in [KeyCode::Right, KeyCode::Left] {
+            for _ in 0..2 {
+                app.handle_key(key)?;
+                assert!(app.navigation_focused);
+                assert!(app.projects_focused || app.commits_focused);
+            }
             app.handle_key(key)?;
-            assert!(app.navigation_focused && app.projects_focused);
-            app.handle_key(key)?;
-            assert!(app.navigation_focused && !app.projects_focused);
+            assert!(app.navigation_focused && !app.projects_focused && !app.commits_focused);
             assert_eq!(app.selected_filter, filter);
         }
         app.handle_key(KeyCode::Enter)?;
