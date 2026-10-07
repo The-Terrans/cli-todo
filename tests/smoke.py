@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as data:
     proc, master, slave, before = launch()
     try:
         first = screen()
-        assert b"Inbox" in first and b"Tasks" in first and b"0/1: section" in first
+        assert b"Inbox" in first and b"Tasks" in first and b"0/1/2: section" in first
         assert b"Title cannot be empty" in send(b"a\r")
         send(b"first\r")
         assert rows() == [("first", 0)]
@@ -89,7 +89,19 @@ with tempfile.TemporaryDirectory() as data:
         assert len(rows()) == 1
         send(b"\x0bdelete\ry")
         assert rows() == []
-        send(b"apreserved\r")
+        send(b"2aWork\r")
+        assert b"Work" in send(b"\r")
+        send(b"aproject task\r")
+        send(b"m\r")
+        assert b"project task" in send(b"1\r")
+        send(b"m\x1b[B\r")
+        send(b"2e!\r")
+        assert b"project AND its tasks" in send(b"d")
+        send(b"n")
+        assert rows() == [("project task", 0)]
+        send(b"dy")
+        assert rows() == []
+        send(b"1apreserved\r")
         with sqlite3.connect(dbpath) as db:
             db.execute("CREATE TRIGGER fail_insert BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT, 'smoke forced error'); END")
         output = send(b"afailure\r")

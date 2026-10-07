@@ -1,5 +1,5 @@
 use crate::{
-    db::{self, Filter, Task},
+    db::{self, Filter, Project, Task},
     Result,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -17,16 +17,18 @@ pub enum Action {
     Edit,
     ToggleCompletion,
     Delete,
+    Move,
     ShowFilter(usize),
     OpenTask(i64),
     Quit,
 }
 
-const ACTIONS: [(&str, Action); 8] = [
+const ACTIONS: [(&str, Action); 9] = [
     ("Add task", Action::Add),
     ("Edit selected task", Action::Edit),
     ("Complete / reopen selected task", Action::ToggleCompletion),
     ("Delete selected task", Action::Delete),
+    ("Move selected task", Action::Move),
     ("Show all tasks", Action::ShowFilter(0)),
     ("Show pending tasks", Action::ShowFilter(1)),
     ("Show completed tasks", Action::ShowFilter(2)),
@@ -38,12 +40,19 @@ pub enum Mode {
     Edit(Option<i64>, String),
     Delete(i64),
     Palette { query: String, selected: usize },
+    ProjectEdit(Option<i64>, String),
+    ProjectDelete(i64),
+    Move { task: i64, selected: usize },
 }
 
 pub struct App {
     db: Connection,
     palette_tasks: Vec<Task>,
     pub tasks: Vec<Task>,
+    pub projects: Vec<Project>,
+    pub selected_project: usize,
+    pub current_project: Option<i64>,
+    pub projects_focused: bool,
     pub selected_task: usize,
     pub navigation_focused: bool,
     pub selected_filter: usize,
@@ -54,21 +63,33 @@ pub struct App {
 impl App {
     pub fn new(db: Connection) -> Result<Self> {
         let mut app = Self {
-            db,
             palette_tasks: vec![],
             tasks: vec![],
+            projects: db::list_projects(&db)?,
+            selected_project: 0,
+            current_project: None,
+            projects_focused: false,
             selected_task: 0,
             navigation_focused: true,
             selected_filter: 0,
             mode: Mode::Browse,
             message: String::new(),
+            db,
         };
         app.refresh_tasks()?;
         Ok(app)
     }
 
     fn refresh_tasks(&mut self) -> Result<()> {
-        self.tasks = db::list_tasks(&self.db, FILTERS[self.selected_filter].1)?;
+        self.tasks = if self.projects_focused && self.current_project.is_none() {
+            vec![]
+        } else {
+            db::list_tasks_in(
+                &self.db,
+                FILTERS[self.selected_filter].1,
+                self.current_project,
+            )?
+        };
         self.selected_task = self.selected_task.min(self.tasks.len().saturating_sub(1));
         Ok(())
     }
@@ -99,6 +120,9 @@ impl App {
             Mode::Edit(..) => self.handle_edit_key(key)?,
             Mode::Delete(id) => self.handle_delete_key(key, id)?,
             Mode::Palette { .. } => return self.handle_palette_key(key),
+            Mode::ProjectEdit(..) => self.handle_project_edit_key(key)?,
+            Mode::ProjectDelete(id) => self.handle_project_delete_key(key, id)?,
+            Mode::Move { .. } => self.handle_move_key(key)?,
         }
         Ok(false)
     }
@@ -106,8 +130,19 @@ impl App {
     fn handle_browse_key(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Char('0') => self.navigation_focused = false,
-            KeyCode::Char('1') => self.navigation_focused = true,
+            KeyCode::Char('1') => self.focus_inbox()?,
+            KeyCode::Left | KeyCode::Right if self.navigation_focused => {
+                if self.projects_focused {
+                    self.focus_inbox()?;
+                } else {
+                    self.focus_projects()?;
+                }
+            }
+            KeyCode::Char('2') => self.focus_projects()?,
             KeyCode::Esc => self.navigation_focused = true,
+            _ if self.navigation_focused && self.projects_focused => {
+                self.handle_project_key(key)?
+            }
             KeyCode::Char('a') => {
                 self.execute_action(Action::Add)?;
             }
@@ -117,18 +152,38 @@ impl App {
         Ok(())
     }
 
+    fn focus_inbox(&mut self) -> Result<()> {
+        self.navigation_focused = true;
+        self.projects_focused = false;
+        self.current_project = None;
+        self.refresh_tasks()
+    }
+
+    fn focus_projects(&mut self) -> Result<()> {
+        self.navigation_focused = true;
+        self.projects_focused = true;
+        self.preview_project()
+    }
+
+    fn preview_project(&mut self) -> Result<()> {
+        self.current_project = self
+            .projects
+            .get(self.selected_project)
+            .map(|project| project.id);
+        self.select_filter(0)
+    }
+
     fn handle_navigation_key(&mut self, key: KeyCode) -> Result<()> {
         let filter = match key {
-            KeyCode::Down | KeyCode::Right => (self.selected_filter + 1) % FILTERS.len(),
-            KeyCode::Up | KeyCode::Left => {
-                (self.selected_filter + FILTERS.len() - 1) % FILTERS.len()
-            }
+            KeyCode::Down => (self.selected_filter + 1) % FILTERS.len(),
+            KeyCode::Up => (self.selected_filter + FILTERS.len() - 1) % FILTERS.len(),
             KeyCode::Enter => {
                 self.navigation_focused = false;
                 return Ok(());
             }
             _ => return Ok(()),
         };
+        self.current_project = None;
         self.select_filter(filter)
     }
 
@@ -151,6 +206,7 @@ impl App {
             }
             KeyCode::Enter | KeyCode::Char('e') => Action::Edit,
             KeyCode::Char('d') => Action::Delete,
+            KeyCode::Char('m') => Action::Move,
             KeyCode::Char(' ') => Action::ToggleCompletion,
             _ => return Ok(()),
         };
@@ -177,11 +233,30 @@ impl App {
                     self.refresh_tasks()?;
                 }
             }
+            Action::Move => {
+                if let Some(task) = self.tasks.get(self.selected_task) {
+                    self.mode = Mode::Move {
+                        task: task.id,
+                        selected: 0,
+                    };
+                }
+            }
             Action::ShowFilter(filter) => {
                 self.select_filter(filter)?;
                 self.navigation_focused = false;
             }
             Action::OpenTask(id) => {
+                if let Some(task) = self.palette_tasks.iter().find(|task| task.id == id) {
+                    self.current_project = task.project_id;
+                    self.projects_focused = task.project_id.is_some();
+                    if let Some(index) = self
+                        .projects
+                        .iter()
+                        .position(|project| Some(project.id) == task.project_id)
+                    {
+                        self.selected_project = index;
+                    }
+                }
                 self.select_filter(0)?;
                 if let Some(index) = self.tasks.iter().position(|task| task.id == id) {
                     self.selected_task = index;
@@ -203,7 +278,7 @@ impl App {
                 }
             }
             Mode::Palette { .. } => self.mode = Mode::Browse,
-            Mode::Edit(..) | Mode::Delete(_) => {}
+            _ => {}
         }
         Ok(())
     }
@@ -304,9 +379,125 @@ impl App {
             self.message = "Title cannot be empty".into();
             return Ok(());
         }
-        db::save_task(&self.db, *id, text)?;
+        if id.is_some() {
+            db::save_task(&self.db, *id, text)?;
+        } else {
+            db::create_task(&self.db, text, self.current_project)?;
+        }
         self.mode = Mode::Browse;
         self.refresh_tasks()
+    }
+
+    fn refresh_projects(&mut self) -> Result<()> {
+        self.projects = db::list_projects(&self.db)?;
+        self.selected_project = self
+            .selected_project
+            .min(self.projects.len().saturating_sub(1));
+        if self.projects_focused {
+            self.preview_project()
+        } else {
+            self.refresh_tasks()
+        }
+    }
+
+    fn handle_project_key(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Down => {
+                self.selected_project =
+                    (self.selected_project + 1).min(self.projects.len().saturating_sub(1));
+                self.preview_project()?;
+            }
+            KeyCode::Up => {
+                self.selected_project = self.selected_project.saturating_sub(1);
+                self.preview_project()?;
+            }
+            KeyCode::Char('a') => self.mode = Mode::ProjectEdit(None, String::new()),
+            KeyCode::Char('e') => {
+                if let Some(project) = self.projects.get(self.selected_project) {
+                    self.mode = Mode::ProjectEdit(Some(project.id), project.name.clone());
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(project) = self.projects.get(self.selected_project) {
+                    self.mode = Mode::ProjectDelete(project.id);
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(project) = self.projects.get(self.selected_project) {
+                    self.current_project = Some(project.id);
+                    self.select_filter(0)?;
+                    self.navigation_focused = false;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_project_edit_key(&mut self, key: KeyCode) -> Result<()> {
+        let Mode::ProjectEdit(_, text) = &mut self.mode else {
+            return Ok(());
+        };
+        match key {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            KeyCode::Char(character) => text.push(character),
+            KeyCode::Enter => self.save_project_edit()?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn save_project_edit(&mut self) -> Result<()> {
+        let Mode::ProjectEdit(id, name) = &self.mode else {
+            return Ok(());
+        };
+        if let Err(error) = db::save_project(&self.db, *id, name) {
+            self.message = error.to_string();
+            return Ok(());
+        }
+        self.mode = Mode::Browse;
+        self.refresh_projects()
+    }
+
+    fn handle_project_delete_key(&mut self, key: KeyCode, id: i64) -> Result<()> {
+        match key {
+            KeyCode::Enter | KeyCode::Char('y') => {
+                db::delete_project(&self.db, id)?;
+                if self.current_project == Some(id) {
+                    self.current_project = None;
+                }
+                self.mode = Mode::Browse;
+                self.refresh_projects()?;
+            }
+            KeyCode::Esc | KeyCode::Char('n') => self.mode = Mode::Browse,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_move_key(&mut self, key: KeyCode) -> Result<()> {
+        let Mode::Move { task, selected } = &mut self.mode else {
+            return Ok(());
+        };
+        match key {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Up => *selected = selected.saturating_sub(1),
+            KeyCode::Down => *selected = (*selected + 1).min(self.projects.len()),
+            KeyCode::Enter => {
+                let project = selected
+                    .checked_sub(1)
+                    .and_then(|index| self.projects.get(index))
+                    .map(|p| p.id);
+                db::move_task(&self.db, *task, project)?;
+                self.mode = Mode::Browse;
+                self.refresh_tasks()?;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     fn handle_delete_key(&mut self, key: KeyCode, id: i64) -> Result<()> {
@@ -340,6 +531,88 @@ mod tests {
                 !app.handle_key_event(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))?
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn left_cursor_previews_each_project_without_enter() -> Result<()> {
+        let mut app = app()?;
+        db::save_task(&app.db, None, "inbox")?;
+        db::save_project(&app.db, None, "First")?;
+        let first = app.db.last_insert_rowid();
+        db::create_task(&app.db, "first task", Some(first))?;
+        db::save_project(&app.db, None, "Second")?;
+        let second = app.db.last_insert_rowid();
+        db::create_task(&app.db, "second task", Some(second))?;
+        app.refresh_projects()?;
+        app.handle_key(KeyCode::Char('2'))?;
+        assert!(app.navigation_focused);
+        assert_eq!(app.tasks[0].title, "first task");
+        app.handle_key(KeyCode::Down)?;
+        assert!(app.navigation_focused);
+        assert_eq!(app.tasks[0].title, "second task");
+        app.handle_key(KeyCode::Up)?;
+        assert_eq!(app.tasks[0].title, "first task");
+        app.handle_key(KeyCode::Enter)?;
+        app.handle_key(KeyCode::Esc)?;
+        assert_eq!(app.tasks[0].title, "first task");
+        app.handle_key(KeyCode::Left)?;
+        assert_eq!(app.tasks[0].title, "inbox");
+        Ok(())
+    }
+
+    #[test]
+    fn projects_create_move_search_rename_and_confirm_deletion() -> Result<()> {
+        let mut app = app()?;
+        db::save_task(&app.db, None, "keep unassigned")?;
+        app.handle_key(KeyCode::Char('2'))?;
+        app.handle_key(KeyCode::Enter)?;
+        assert!(app.navigation_focused);
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Enter)?;
+        assert!(!app.message.is_empty());
+        app.handle_key(KeyCode::Char('W'))?;
+        app.handle_key(KeyCode::Enter)?;
+        let project = app.projects[0].id;
+        app.handle_key(KeyCode::Enter)?;
+        assert_eq!(app.current_project, Some(project));
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Char('x'))?;
+        app.handle_key(KeyCode::Enter)?;
+        let task = app.tasks[0].id;
+        assert_eq!(app.tasks[0].project_id, Some(project));
+        app.handle_key(KeyCode::Char('m'))?;
+        app.handle_key(KeyCode::Esc)?;
+        assert_eq!(app.tasks.len(), 1);
+        app.handle_key(KeyCode::Char('m'))?;
+        app.handle_key(KeyCode::Enter)?;
+        assert!(app.tasks.is_empty());
+        app.handle_key(KeyCode::Char('1'))?;
+        search_actions(&mut app, "x")?;
+        app.handle_key(KeyCode::Enter)?;
+        assert_eq!(app.tasks[app.selected_task].id, task);
+        app.handle_key(KeyCode::Char('m'))?;
+        app.handle_key(KeyCode::Down)?;
+        app.handle_key(KeyCode::Enter)?;
+        search_actions(&mut app, "x")?;
+        app.handle_key(KeyCode::Enter)?;
+        assert_eq!(app.current_project, Some(project));
+        app.handle_key(KeyCode::Esc)?;
+        assert!(app.projects_focused);
+        app.handle_key(KeyCode::Char('e'))?;
+        app.handle_key(KeyCode::Char('!'))?;
+        app.handle_key(KeyCode::Enter)?;
+        assert_eq!(app.projects[0].name, "W!");
+        app.handle_key(KeyCode::Char('d'))?;
+        app.handle_key(KeyCode::Esc)?;
+        assert_eq!(app.projects.len(), 1);
+        app.handle_key(KeyCode::Char('d'))?;
+        app.handle_key(KeyCode::Char('y'))?;
+        assert!(app.projects.is_empty());
+        assert_eq!(app.current_project, None);
+        assert!(app.tasks.is_empty());
+        app.handle_key(KeyCode::Char('1'))?;
+        assert_eq!(app.tasks[0].title, "keep unassigned");
         Ok(())
     }
 
@@ -558,6 +831,26 @@ mod tests {
     }
 
     #[test]
+    fn horizontal_arrows_only_switch_left_sections() -> Result<()> {
+        let mut app = app()?;
+        let filter = app.selected_filter;
+        for key in [KeyCode::Right, KeyCode::Left] {
+            app.handle_key(key)?;
+            assert!(app.navigation_focused && app.projects_focused);
+            app.handle_key(key)?;
+            assert!(app.navigation_focused && !app.projects_focused);
+            assert_eq!(app.selected_filter, filter);
+        }
+        app.handle_key(KeyCode::Enter)?;
+        for key in [KeyCode::Left, KeyCode::Right] {
+            app.handle_key(key)?;
+            assert!(!app.navigation_focused);
+            assert_eq!(app.selected_filter, filter);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn navigation_wraps_filters_and_clamps_task_selection() -> Result<()> {
         let mut app = app()?;
         db::save_task(&app.db, None, "first")?;
@@ -577,10 +870,10 @@ mod tests {
         assert_eq!(app.selected_task, 1);
         app.handle_key(KeyCode::Esc)?;
         assert!(app.navigation_focused);
-        app.handle_key(KeyCode::Right)?;
+        app.handle_key(KeyCode::Down)?;
         assert_eq!(app.selected_filter, 1);
         assert_eq!(app.selected_task, 0);
-        app.handle_key(KeyCode::Left)?;
+        app.handle_key(KeyCode::Up)?;
         assert_eq!(app.selected_filter, 0);
         Ok(())
     }

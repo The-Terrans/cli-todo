@@ -7,6 +7,12 @@ pub struct Task {
     pub id: i64,
     pub title: String,
     pub done: bool,
+    pub project_id: Option<i64>,
+}
+
+pub struct Project {
+    pub id: i64,
+    pub name: String,
 }
 
 #[derive(Clone, Copy)]
@@ -19,12 +25,25 @@ pub enum Filter {
 pub fn open(path: &Path) -> Result<Connection> {
     let db = Connection::open(path)?;
     db.execute_batch(
-        "CREATE TABLE IF NOT EXISTS tasks (
+        "PRAGMA foreign_keys = ON;
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE CHECK(length(trim(name)) > 0)
+        );
+        CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY,
             title TEXT NOT NULL CHECK(length(trim(title)) > 0),
             done INTEGER NOT NULL DEFAULT 0 CHECK(done IN (0,1))
         );",
     )?;
+    let mut columns = db.prepare("PRAGMA table_info(tasks)")?;
+    let names = columns
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if !names.iter().any(|name| name == "project_id") {
+        db.execute_batch("ALTER TABLE tasks ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE;")?;
+    }
+    drop(columns);
     Ok(db)
 }
 
@@ -36,8 +55,20 @@ pub fn save_task(db: &Connection, id: Option<i64>, title: &str) -> Result<()> {
     if let Some(id) = id {
         db.execute("UPDATE tasks SET title=?1 WHERE id=?2", params![title, id])?;
     } else {
-        db.execute("INSERT INTO tasks(title) VALUES (?1)", [title])?;
+        create_task(db, title, None)?;
     }
+    Ok(())
+}
+
+pub fn create_task(db: &Connection, title: &str, project: Option<i64>) -> Result<()> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Title cannot be empty".into());
+    }
+    db.execute(
+        "INSERT INTO tasks(title,project_id) VALUES (?1,?2)",
+        params![title, project],
+    )?;
     Ok(())
 }
 
@@ -47,13 +78,15 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
         Filter::Pending => Some(false),
         Filter::Completed => Some(true),
     };
-    let mut statement =
-        db.prepare("SELECT id,title,done FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY id")?;
+    let mut statement = db.prepare(
+        "SELECT id,title,done,project_id FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY id",
+    )?;
     let rows = statement.query_map([done], |row| {
         Ok(Task {
             id: row.get(0)?,
             title: row.get(1)?,
             done: row.get(2)?,
+            project_id: row.get(3)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -69,10 +102,112 @@ pub fn toggle_task(db: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+pub fn list_tasks_in(db: &Connection, filter: Filter, project: Option<i64>) -> Result<Vec<Task>> {
+    Ok(list_tasks(db, filter)?
+        .into_iter()
+        .filter(|task| task.project_id == project)
+        .collect())
+}
+
+pub fn move_task(db: &Connection, id: i64, project: Option<i64>) -> Result<()> {
+    db.execute(
+        "UPDATE tasks SET project_id=?1 WHERE id=?2",
+        params![project, id],
+    )?;
+    Ok(())
+}
+
+pub fn list_projects(db: &Connection) -> Result<Vec<Project>> {
+    let mut statement = db.prepare("SELECT id,name FROM projects ORDER BY id")?;
+    let rows = statement.query_map([], |row| {
+        Ok(Project {
+            id: row.get(0)?,
+            name: row.get(1)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn save_project(db: &Connection, id: Option<i64>, name: &str) -> Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Project name cannot be empty".into());
+    }
+    if let Some(id) = id {
+        db.execute("UPDATE projects SET name=?1 WHERE id=?2", params![name, id])?;
+    } else {
+        db.execute("INSERT INTO projects(name) VALUES (?1)", [name])?;
+    }
+    Ok(())
+}
+
+pub fn delete_project(db: &Connection, id: i64) -> Result<()> {
+    db.execute("DELETE FROM projects WHERE id=?1", [id])?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{env, fs, time::SystemTime};
+
+    #[test]
+    fn old_databases_migrate_without_losing_tasks() -> Result<()> {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_nanos();
+        let path = env::temp_dir().join(format!("cli-todo-migration-{timestamp}.sqlite3"));
+        let db = Connection::open(&path)?;
+        db.execute_batch("CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0);
+            INSERT INTO tasks(title,done) VALUES ('existing',1);")?;
+        drop(db);
+        let db = open(&path)?;
+        let tasks = list_tasks_in(&db, Filter::All, None)?;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "existing");
+        assert!(tasks[0].done);
+        save_project(&db, None, "Work")?;
+        let project = db.last_insert_rowid();
+        create_task(&db, "project task", Some(project))?;
+        drop(db);
+        let db = open(&path)?;
+        assert_eq!(list_projects(&db)?[0].name, "Work");
+        assert_eq!(
+            list_tasks_in(&db, Filter::All, Some(project))?[0].title,
+            "project task"
+        );
+        delete_project(&db, project)?;
+        assert_eq!(list_tasks(&db, Filter::All)?.len(), 1);
+        drop(db);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn projects_scope_move_and_cascade_tasks() -> Result<()> {
+        let db = open(Path::new(":memory:"))?;
+        save_project(&db, None, "Work")?;
+        let project = db.last_insert_rowid();
+        save_task(&db, None, "Inbox task")?;
+        let inbox_task = db.last_insert_rowid();
+        save_task(&db, None, "Project task")?;
+        let task = db.last_insert_rowid();
+        move_task(&db, task, Some(project))?;
+        assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 1);
+        assert_eq!(list_tasks_in(&db, Filter::All, Some(project))?[0].id, task);
+        move_task(&db, task, None)?;
+        assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 2);
+        move_task(&db, task, Some(project))?;
+        save_project(&db, Some(project), "Renamed")?;
+        assert_eq!(list_projects(&db)?[0].name, "Renamed");
+        assert!(save_project(&db, None, "Renamed").is_err());
+        assert!(save_project(&db, None, " ").is_err());
+        delete_project(&db, project)?;
+        assert!(list_projects(&db)?.is_empty());
+        assert_eq!(list_tasks(&db, Filter::All)?.len(), 1);
+        assert_eq!(list_tasks(&db, Filter::All)?[0].id, inbox_task);
+        Ok(())
+    }
 
     #[test]
     fn task_changes_persist_across_restarts() -> Result<()> {
