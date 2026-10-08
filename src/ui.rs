@@ -169,14 +169,37 @@ fn draw_commit_details(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
-    let items = app.tasks.iter().map(|task| {
-        ListItem::new(format!(
-            "[{}] {}",
-            if task.done { "x" } else { " " },
-            task.title
-        ))
-    });
     let active = matches!(app.mode, Mode::Browse) && !app.navigation_focused;
+    let items = app.tasks.iter().enumerate().map(|(index, task)| {
+        let title_style = if active && index == app.selected_task {
+            selection_style()
+        } else {
+            Style::default().fg(Color::Reset)
+        };
+        let mut lines = vec![Line::styled(
+            format!("[{}] {}", if task.done { "x" } else { " " }, task.title,),
+            title_style,
+        )];
+        let mut description = task
+            .description
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty());
+        if let Some(preview) = description.next() {
+            let suffix = if description.next().is_some() {
+                " …"
+            } else {
+                ""
+            };
+            lines.push(Line::styled(
+                format!("    {preview}{suffix}"),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            ));
+        }
+        ListItem::new(lines)
+    });
     let mut state = ListState::default()
         .with_selected((active && !app.tasks.is_empty()).then_some(app.selected_task));
     let title = match app
@@ -190,14 +213,16 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
         List::new(items)
             .highlight_spacing(HighlightSpacing::Always)
             .block(panel(&title, !app.navigation_focused).border_type(BorderType::Rounded))
-            .highlight_style(selection_style())
+            .style(Style::default().fg(Color::Black))
+            .highlight_style(Style::default().bg(Color::LightYellow))
             .highlight_symbol("> "),
         area,
         &mut state,
     );
     if app.tasks.is_empty() {
         frame.render_widget(
-            Paragraph::new("No tasks here. Press a to add."),
+            Paragraph::new("No tasks here. Press a to add.")
+                .style(Style::default().fg(Color::Reset)),
             area.inner(Margin::new(2, 1)),
         );
     }
@@ -278,7 +303,7 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
 }
 
 fn draw_task_editor(frame: &mut Frame, editing: bool, draft: &TaskDraft, message: &str) {
-    let area = input_dialog_area(frame.area(), if message.is_empty() { 11 } else { 12 });
+    let area = task_editor_area(frame.area());
     let rows = Layout::vertical([
         Constraint::Length(if message.is_empty() { 3 } else { 4 }),
         Constraint::Min(3),
@@ -565,6 +590,16 @@ fn draw_palette(frame: &mut Frame, app: &App) {
     );
 }
 
+fn task_editor_area(area: Rect) -> Rect {
+    let height = ((u32::from(area.height) * 70 / 100) as u16)
+        .max(12)
+        .min(area.height.saturating_sub(2));
+    let mut dialog = input_dialog_area(area, height);
+    dialog.height = height;
+    dialog.y = area.y + (area.height - height) / 2;
+    dialog
+}
+
 fn input_dialog_area(area: Rect, height: u16) -> Rect {
     let mut dialog = dialog_area(area, height);
     dialog.width = ((u32::from(area.width) * 70 / 100) as u16)
@@ -598,6 +633,50 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn task_descriptions_use_a_dim_preview_without_extra_empty_rows() -> Result<()> {
+        let db = db::open(Path::new(":memory:"))?;
+        db::save_task_details(&db, None, "with details", "first line\nsecond line", None)?;
+        db::save_task_details(&db, None, "without details", "", None)?;
+        db::save_task_details(&db, None, "blank details", " \n ", None)?;
+        let mut app = App::new(db)?;
+        let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+        for focused in [false, true] {
+            if focused {
+                app.handle_key_event(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE))?;
+            }
+            terminal.draw(|frame| draw(frame, &app))?;
+            let buffer = terminal.backend().buffer();
+            let preview = &buffer[(32, 2)];
+            assert_eq!(preview.symbol(), "f");
+            assert_eq!(preview.fg, Color::DarkGray);
+            assert!(preview.modifier.contains(Modifier::DIM));
+            assert!(!preview.modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(32, 1)].symbol(), "w");
+            assert_eq!(buffer[(32, 3)].symbol(), "w");
+            assert_eq!(buffer[(32, 4)].symbol(), "b");
+            assert_eq!(buffer[(32, 5)].symbol(), " ");
+            let row: String = buffer.content[200..300]
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(row.contains("first line …"));
+            let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(!text.contains("second line"));
+            if focused {
+                assert_eq!(buffer[(26, 1)].symbol(), ">");
+                assert_eq!(buffer[(26, 1)].fg, Color::Black);
+                assert_eq!(preview.bg, Color::LightYellow);
+                assert!(buffer[(32, 1)].modifier.contains(Modifier::BOLD));
+            }
+        }
+        app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))?;
+        terminal.draw(|frame| draw(frame, &app))?;
+        assert_eq!(terminal.backend().buffer()[(26, 3)].symbol(), ">");
+        assert_eq!(app.selected_task, 1);
+        Ok(())
+    }
+
+    #[test]
     fn input_width_has_a_minimum_but_never_overflows_small_terminals() {
         for width in [1, 30, 59, 60, 61, 62, 80, 100, 160] {
             let area = Rect::new(7, 3, width, 25);
@@ -611,6 +690,37 @@ mod tests {
             if width >= 62 {
                 assert!(dialog.width >= 60);
             }
+        }
+    }
+
+    #[test]
+    fn task_editor_height_scales_and_stays_centered_within_the_terminal() {
+        for height in [1, 8, 14, 20, 30, 50] {
+            let terminal = Rect::new(7, 3, 100, height);
+            let dialog = task_editor_area(terminal);
+            let expected = (height * 70 / 100).max(12).min(height.saturating_sub(2));
+            assert_eq!(dialog.height, expected);
+            assert_eq!(dialog.y, terminal.y + (height - expected) / 2);
+            assert!(dialog.bottom() <= terminal.bottom());
+            if height >= 14 {
+                assert!(dialog.height >= 12);
+            }
+        }
+        let mut app = App::new(db::open(Path::new(":memory:")).unwrap()).unwrap();
+        app.mode = Mode::Edit(None, TaskDraft::default());
+        for height in [20, 30, 50] {
+            let mut terminal = Terminal::new(TestBackend::new(100, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &app)).unwrap();
+            let cells = &terminal.backend().buffer().content;
+            let corners: Vec<_> = cells
+                .iter()
+                .enumerate()
+                .filter(|(_, cell)| cell.symbol() == "┌")
+                .map(|(index, _)| index / 100)
+                .collect();
+            let bottom = cells.iter().position(|cell| cell.symbol() == "└").unwrap() / 100;
+            assert_eq!(bottom - corners[0] + 1, 3, "title must remain compact");
+            assert_eq!(corners[1] - corners[0], 3);
         }
     }
 

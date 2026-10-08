@@ -50,9 +50,11 @@ Navigation offers All, Pending, and Completed filters. Arrows apply the filter i
 
 ## Task descriptions
 
-Adding or editing a task opens **Title** and **Description** sections using 70% of the terminal width, centered with a minimum width of 60 columns. On smaller terminals, they shrink to fit. Title is focused initially: **Enter** saves the whole task and **Esc** cancels. **Tab** toggles focus, with a hint on Description's top-right border.
+Adding or editing a task opens **Title** and **Description** sections using 70% of the terminal width, centered with a minimum width of 60 columns. The editor also uses 70% of the terminal height (minimum 12 rows, reduced to fit), centered vertically. Title stays compact; Description fills the extra height. On smaller terminals, both dimensions shrink to fit. Title is focused initially: **Enter** saves the whole task and **Esc** cancels. **Tab** toggles focus, with a hint on Description's top-right border.
 
 In Description, **Enter** inserts a newline and **Ctrl+S** saves the entire task. **Esc** cancels all draft changes. Only the focused field shows its save/cancel footer and cursor. Description text wraps and scrolls to keep the input end visible. Editing remains append/backspace only; descriptions are optional and preserve whitespace.
+
+The task list shows the first nonblank description line beneath its title, indented in dim dark gray. An ellipsis indicates additional lines; open the editor for the full text. Empty descriptions take no extra row. Terminal font size is fixed, so subdued styling provides the visual hierarchy.
 
 Existing tasks get empty descriptions automatically. Descriptions persist across restarts and are included in Git snapshots and safe Pull. Older snapshots without descriptions remain readable and are upgraded when applied.
 
