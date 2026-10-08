@@ -1,4 +1,7 @@
-use crate::app::{App, Mode, TaskDraft, FILTERS, KEYBINDINGS};
+use crate::{
+    constants::{FILTERS, KEYBINDINGS},
+    types::{App, Mode, TaskDraft},
+};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},

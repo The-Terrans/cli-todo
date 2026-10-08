@@ -1,33 +1,14 @@
-use crate::Result;
+use crate::{
+    types::{Commit, Filter, History, PullPlan, SyncResult},
+    Result,
+};
 use rusqlite::{backup::Backup, Connection, OpenFlags};
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Output},
     time::{Duration, SystemTime},
 };
-
-pub struct Commit {
-    pub hash: String,
-    pub subject: String,
-}
-
-pub struct PullPlan {
-    previous_head: Option<String>,
-    hash: String,
-    branch: String,
-    snapshot: Vec<u8>,
-}
-
-pub enum SyncResult {
-    Message(String),
-    Pull(PullPlan),
-}
-
-#[derive(Clone)]
-pub struct History {
-    pub directory: PathBuf,
-}
 
 impl History {
     pub fn new(database: &Connection) -> Option<Self> {
@@ -125,8 +106,8 @@ impl History {
             fs::write(&path, snapshot.stdout)?;
             let committed = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
             // Compare todo contents, not SQLite headers changed by backup/restore.
-            Ok(crate::db::list_tasks(database, crate::db::Filter::All)?
-                != crate::db::list_tasks(&committed, crate::db::Filter::All)?
+            Ok(crate::db::list_tasks(database, Filter::All)?
+                != crate::db::list_tasks(&committed, Filter::All)?
                 || crate::db::list_projects(database)? != crate::db::list_projects(&committed)?)
         })();
         if path.exists() {
@@ -401,7 +382,7 @@ impl History {
         if integrity != "ok" {
             return Err("Remote SQLite snapshot failed integrity checks".into());
         }
-        crate::db::list_tasks(&source, crate::db::Filter::All)?;
+        crate::db::list_tasks(&source, Filter::All)?;
         crate::db::list_projects(&source)?;
         let valid_schema: bool = source.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_list('tasks') WHERE \"table\"='projects' AND \"from\"='project_id' AND on_delete='CASCADE')",
@@ -546,7 +527,7 @@ mod tests {
             panic!("expected initial snapshot");
         };
         b.apply_pull(&mut second, plan)?;
-        assert_eq!(db::list_tasks(&second, db::Filter::All)?[0].title, "first");
+        assert_eq!(db::list_tasks(&second, Filter::All)?[0].title, "first");
         assert_eq!(db::list_projects(&second)?[0].name, "Work");
         assert!(!b.has_changes(&second)?);
         assert_eq!(fs::read_dir(two.join("backups"))?.count(), 1);
@@ -568,7 +549,7 @@ mod tests {
         db::save_task(&second, Some(1), "unsaved locally")?;
         assert!(b.apply_pull(&mut second, plan).is_err());
         assert_eq!(
-            db::list_tasks(&second, db::Filter::All)?[0].title,
+            db::list_tasks(&second, Filter::All)?[0].title,
             "unsaved locally"
         );
         assert_eq!(b.list()?.len(), 1);
@@ -582,15 +563,15 @@ mod tests {
         fs::write(&lock, "locked")?;
         let error = b.apply_pull(&mut second, plan).err().unwrap().to_string();
         assert!(error.contains("original database restored"), "{error}");
-        assert_eq!(db::list_tasks(&second, db::Filter::All)?[0].title, "first");
+        assert_eq!(db::list_tasks(&second, Filter::All)?[0].title, "first");
         fs::remove_file(lock)?;
         let SyncResult::Pull(plan) = b.fetch_pull()? else {
             panic!("expected new snapshot");
         };
         b.apply_pull(&mut second, plan)?;
-        assert_eq!(db::list_tasks(&second, db::Filter::All)?[0].title, "second");
+        assert_eq!(db::list_tasks(&second, Filter::All)?[0].title, "second");
         assert_eq!(
-            db::list_tasks(&second, db::Filter::All)?[0].description,
+            db::list_tasks(&second, Filter::All)?[0].description,
             "remote details\nsecond line"
         );
         assert_eq!(b.list()?.len(), 2);
@@ -620,7 +601,7 @@ mod tests {
             .to_string()
             .contains("diverged"));
         assert!(b.push().is_err());
-        assert_eq!(db::list_tasks(&second, db::Filter::All)?.len(), 2);
+        assert_eq!(db::list_tasks(&second, Filter::All)?.len(), 2);
         fs::write(b.directory.join("notes"), "untracked")?;
         assert!(b.fetch_pull().is_err());
         fs::remove_file(b.directory.join("notes"))?;
@@ -659,7 +640,7 @@ mod tests {
             panic!("expected download");
         };
         assert!(history.apply_pull(&mut database, plan).is_err());
-        assert!(db::list_tasks(&database, db::Filter::All)?.is_empty());
+        assert!(db::list_tasks(&database, Filter::All)?.is_empty());
         assert!(history.list()?.is_empty());
         assert!(!root.join("backups").exists());
         drop(database);
@@ -708,7 +689,7 @@ mod tests {
         let lock = history.directory.join(".git/index.lock");
         fs::write(&lock, "locked")?;
         assert!(history.commit(&database, "second checkpoint").is_err());
-        assert_eq!(db::list_tasks(&database, db::Filter::All)?.len(), 2);
+        assert_eq!(db::list_tasks(&database, Filter::All)?.len(), 2);
         fs::remove_file(lock)?;
         history.commit(&database, "second checkpoint")?;
         assert_eq!(history.list()?.len(), 2);
@@ -718,9 +699,9 @@ mod tests {
         let old = root.join("old.sqlite3");
         fs::write(&old, output.stdout)?;
         let snapshot = db::open(&old)?;
-        assert_eq!(db::list_tasks(&snapshot, db::Filter::All)?.len(), 1);
+        assert_eq!(db::list_tasks(&snapshot, Filter::All)?.len(), 1);
         assert_eq!(db::list_projects(&snapshot)?[0].name, "Work");
-        assert_eq!(db::list_tasks(&database, db::Filter::All)?.len(), 2);
+        assert_eq!(db::list_tasks(&database, Filter::All)?.len(), 2);
         drop(snapshot);
         drop(database);
         fs::remove_dir_all(root)?;

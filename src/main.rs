@@ -1,14 +1,14 @@
 mod app;
+mod constants;
 mod db;
 mod history;
+mod types;
 mod ui;
 
-use app::App;
 use crossterm::event::{self, Event};
 use ratatui::DefaultTerminal;
-use std::{env, error::Error, fs, path::PathBuf, time::Duration};
-
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+use std::{env, fs, path::PathBuf, time::Duration};
+use types::{App, Result};
 
 fn main() -> Result<()> {
     let directory = data_directory()?;

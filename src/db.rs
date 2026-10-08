@@ -1,28 +1,9 @@
-use crate::Result;
+use crate::{
+    types::{Filter, Project, Task},
+    Result,
+};
 use rusqlite::{params, Connection};
 use std::path::Path;
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Task {
-    pub id: i64,
-    pub title: String,
-    pub description: String,
-    pub done: bool,
-    pub project_id: Option<i64>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Project {
-    pub id: i64,
-    pub name: String,
-}
-
-#[derive(Clone, Copy)]
-pub enum Filter {
-    All,
-    Pending,
-    Completed,
-}
 
 pub fn open(path: &Path) -> Result<Connection> {
     let db = Connection::open(path)?;
