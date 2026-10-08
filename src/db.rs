@@ -142,6 +142,14 @@ pub fn save_project(db: &Connection, id: Option<i64>, name: &str) -> Result<()> 
     Ok(())
 }
 
+pub fn nuke(db: &Connection) -> Result<()> {
+    let transaction = db.unchecked_transaction()?;
+    transaction.execute("DELETE FROM tasks", [])?;
+    transaction.execute("DELETE FROM projects", [])?;
+    transaction.commit()?;
+    Ok(())
+}
+
 pub fn delete_project(db: &Connection, id: i64) -> Result<()> {
     db.execute("DELETE FROM projects WHERE id=?1", [id])?;
     Ok(())
@@ -151,6 +159,30 @@ pub fn delete_project(db: &Connection, id: i64) -> Result<()> {
 mod tests {
     use super::*;
     use std::{env, fs, time::SystemTime};
+
+    #[test]
+    fn nuke_clears_all_data_and_rolls_back_on_failure() -> Result<()> {
+        let db = open(Path::new(":memory:"))?;
+        save_project(&db, None, "Work")?;
+        let project = db.last_insert_rowid();
+        create_task(&db, "project task", Some(project))?;
+        let task = db.last_insert_rowid();
+        toggle_task(&db, task)?;
+        create_task(&db, "inbox task", None)?;
+        db.execute_batch("CREATE TRIGGER prevent_nuke BEFORE DELETE ON projects BEGIN SELECT RAISE(ABORT, 'blocked'); END;")?;
+        assert!(nuke(&db).is_err());
+        assert_eq!(list_tasks(&db, Filter::All)?.len(), 2);
+        assert_eq!(list_projects(&db)?.len(), 1);
+        db.execute_batch("DROP TRIGGER prevent_nuke;")?;
+        nuke(&db)?;
+        assert!(list_tasks(&db, Filter::All)?.is_empty());
+        assert!(list_projects(&db)?.is_empty());
+        nuke(&db)?;
+        save_project(&db, None, "New project")?;
+        create_task(&db, "new task", Some(db.last_insert_rowid()))?;
+        assert_eq!(list_tasks(&db, Filter::All)?.len(), 1);
+        Ok(())
+    }
 
     #[test]
     fn old_databases_migrate_without_losing_tasks() -> Result<()> {

@@ -42,12 +42,23 @@ pub enum Mode {
     Browse,
     Edit(Option<i64>, String),
     Delete(i64),
-    Palette { query: String, selected: usize },
+    Nuke {
+        tasks: usize,
+        projects: usize,
+        commits: usize,
+    },
+    Palette {
+        query: String,
+        selected: usize,
+    },
     ProjectEdit(Option<i64>, String),
     ProjectDelete(i64),
     CommitEdit(String),
     RemoteEdit(String),
-    Move { task: i64, selected: usize },
+    Move {
+        task: i64,
+        selected: usize,
+    },
 }
 
 pub struct App {
@@ -161,6 +172,7 @@ impl App {
             Mode::Browse => self.handle_browse_key(key)?,
             Mode::Edit(..) => self.handle_edit_key(key)?,
             Mode::Delete(id) => self.handle_delete_key(key, id)?,
+            Mode::Nuke { .. } => self.handle_nuke_key(key)?,
             Mode::Palette { .. } => return self.handle_palette_key(key),
             Mode::ProjectEdit(..) => self.handle_project_edit_key(key)?,
             Mode::ProjectDelete(id) => self.handle_project_delete_key(key, id)?,
@@ -173,6 +185,7 @@ impl App {
 
     fn handle_browse_key(&mut self, key: KeyCode) -> Result<()> {
         match key {
+            KeyCode::Char('D') => self.begin_nuke()?,
             KeyCode::Char('0') => self.navigation_focused = false,
             KeyCode::Char('1') => self.focus_inbox()?,
             KeyCode::Left | KeyCode::Right if self.navigation_focused => self.cycle_section(key)?,
@@ -188,6 +201,54 @@ impl App {
             }
             _ if self.navigation_focused => self.handle_navigation_key(key)?,
             _ => self.handle_task_key(key)?,
+        }
+        Ok(())
+    }
+
+    fn begin_nuke(&mut self) -> Result<()> {
+        if self.sync_receiver.is_some() {
+            self.message = "Wait for sync to finish before nuking todo data".into();
+            return Ok(());
+        }
+        self.mode = Mode::Nuke {
+            tasks: db::list_tasks(&self.db, Filter::All)?.len(),
+            projects: db::list_projects(&self.db)?.len(),
+            commits: self.commits.len(),
+        };
+        Ok(())
+    }
+
+    fn handle_nuke_key(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc | KeyCode::Char('n') => self.mode = Mode::Browse,
+            KeyCode::Char('y') | KeyCode::Enter => {
+                let result = match &self.history {
+                    Some(history) => history.nuke(&self.db),
+                    None => db::nuke(&self.db),
+                };
+                if let Err(error) = result {
+                    self.refresh_projects()?;
+                    self.reload_commits();
+                    self.load_remote();
+                    self.update_commit_status();
+                    self.message = format!("Could not nuke todo data: {error}");
+                    return Ok(());
+                }
+                self.projects.clear();
+                self.palette_tasks.clear();
+                self.selected_project = 0;
+                self.selected_filter = 0;
+                self.mode = Mode::Browse;
+                self.focus_inbox()?;
+                self.selected_commit = 0;
+                self.reload_commits();
+                self.load_remote();
+                self.update_commit_status();
+                self.message =
+                    "Tasks, projects, local commits and remote settings deleted. Backups kept."
+                        .into();
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -893,6 +954,71 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn nuke_requires_confirmation_and_keeps_failed_deletions_atomic() -> Result<()> {
+        let mut app = app()?;
+        db::save_project(&app.db, None, "Work")?;
+        let work = app.db.last_insert_rowid();
+        db::create_task(&app.db, "completed project task", Some(work))?;
+        db::toggle_task(&app.db, app.db.last_insert_rowid())?;
+        db::save_project(&app.db, None, "Home")?;
+        db::create_task(
+            &app.db,
+            "other project task",
+            Some(app.db.last_insert_rowid()),
+        )?;
+        db::create_task(&app.db, "inbox task", None)?;
+        app.refresh_projects()?;
+        for (section, cancel) in [
+            ('1', KeyCode::Esc),
+            ('2', KeyCode::Char('n')),
+            ('3', KeyCode::Esc),
+            ('0', KeyCode::Char('n')),
+        ] {
+            app.handle_key(KeyCode::Char(section))?;
+            app.handle_key_event(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT))?;
+            assert!(matches!(
+                app.mode,
+                Mode::Nuke {
+                    tasks: 3,
+                    projects: 2,
+                    ..
+                }
+            ));
+            assert!(!app.handle_key(KeyCode::Char('q'))?);
+            app.handle_key(cancel)?;
+            assert!(matches!(app.mode, Mode::Browse));
+            assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
+            assert_eq!(db::list_projects(&app.db)?.len(), 2);
+        }
+        app.handle_key(KeyCode::Char('1'))?;
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT))?;
+        assert!(matches!(&app.mode, Mode::Edit(None, text) if text == "D"));
+        app.handle_key(KeyCode::Esc)?;
+        app.handle_key(KeyCode::Char('2'))?;
+        app.handle_key(KeyCode::Enter)?;
+        app.handle_key(KeyCode::Char('D'))?;
+        app.db.execute_batch("CREATE TRIGGER prevent_nuke BEFORE DELETE ON projects BEGIN SELECT RAISE(ABORT, 'blocked'); END;")?;
+        app.handle_key(KeyCode::Enter)?;
+        assert!(matches!(app.mode, Mode::Nuke { .. }));
+        assert!(app.message.contains("Could not nuke"));
+        assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
+        assert_eq!(db::list_projects(&app.db)?.len(), 2);
+        app.db.execute_batch("DROP TRIGGER prevent_nuke;")?;
+        app.handle_key(KeyCode::Char('y'))?;
+        assert!(matches!(app.mode, Mode::Browse));
+        assert!(app.tasks.is_empty() && app.projects.is_empty());
+        assert!(db::list_tasks(&app.db, Filter::All)?.is_empty());
+        assert!(db::list_projects(&app.db)?.is_empty());
+        assert!(app.navigation_focused && !app.projects_focused && !app.commits_focused);
+        assert_eq!(app.current_project, None);
+        assert_eq!(app.selected_task, 0);
+        assert_eq!(app.selected_project, 0);
+        assert_eq!(app.selected_filter, 0);
+        Ok(())
+    }
+
     fn wait_for_sync(app: &mut App) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while app.sync_receiver.is_some() {
@@ -952,6 +1078,9 @@ mod tests {
         assert!(app.sync_receiver.is_some());
         app.handle_key(KeyCode::Char('r'))?;
         assert!(matches!(app.mode, Mode::Browse));
+        app.handle_key(KeyCode::Char('D'))?;
+        assert!(matches!(app.mode, Mode::Browse));
+        assert!(app.message.contains("Wait for sync"));
         assert!(!app.handle_key(KeyCode::Char('q'))?);
         app.handle_key(KeyCode::Char('1'))?;
         wait_for_sync(&mut app);
@@ -1058,8 +1187,56 @@ mod tests {
         app.handle_key(KeyCode::Char(' '))?;
         assert!(app.uncommitted_changes);
         drop(app);
-        let app = App::new(db::open(&path)?)?;
+        let mut app = App::new(db::open(&path)?)?;
         assert!(app.uncommitted_changes);
+        app.history
+            .as_ref()
+            .unwrap()
+            .set_remote("/not-contacted/remote.git")?;
+        app.load_remote();
+        let backup = root.join("backups/keep.sqlite3");
+        fs::create_dir_all(backup.parent().unwrap())?;
+        fs::write(&backup, "existing backup")?;
+        app.handle_key(KeyCode::Char('D'))?;
+        assert!(matches!(app.mode, Mode::Nuke { commits: 1, .. }));
+        app.handle_key(KeyCode::Esc)?;
+        assert_eq!(app.history.as_ref().unwrap().list()?.len(), 1);
+        assert_eq!(
+            app.history.as_ref().unwrap().remote()?,
+            "/not-contacted/remote.git"
+        );
+        app.db.execute_batch("CREATE TRIGGER prevent_nuke BEFORE DELETE ON tasks BEGIN SELECT RAISE(ABORT, 'blocked'); END;")?;
+        app.handle_key(KeyCode::Char('D'))?;
+        app.handle_key(KeyCode::Enter)?;
+        assert!(matches!(app.mode, Mode::Nuke { .. }));
+        assert!(app.message.contains("Could not nuke"));
+        assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 1);
+        assert_eq!(app.history.as_ref().unwrap().list()?.len(), 1);
+        assert_eq!(
+            app.history.as_ref().unwrap().remote()?,
+            "/not-contacted/remote.git"
+        );
+        assert!(!fs::read_dir(&root)?.any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".nuke-history-")));
+        app.db.execute_batch("DROP TRIGGER prevent_nuke;")?;
+        app.handle_key(KeyCode::Char('y'))?;
+        assert!(app.tasks.is_empty() && app.projects.is_empty());
+        assert!(app.commits.is_empty());
+        assert!(app.history.as_ref().unwrap().list()?.is_empty());
+        assert!(app.history.as_ref().unwrap().remote()?.is_empty());
+        assert!(app.remote_url.is_empty());
+        assert!(!history.exists());
+        assert_eq!(fs::read_to_string(&backup)?, "existing backup");
+        assert!(!app.uncommitted_changes);
+        drop(app);
+        let app = App::new(db::open(&path)?)?;
+        assert!(app.tasks.is_empty() && app.projects.is_empty());
+        assert!(app.commits.is_empty());
+        assert!(app.remote_url.is_empty());
+        assert!(!app.uncommitted_changes);
         drop(app);
         fs::remove_dir_all(root)?;
         Ok(())

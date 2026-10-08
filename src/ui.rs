@@ -211,13 +211,13 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     if app.commits_focused {
-        frame.render_widget(Paragraph::new("r: remote | p: push | P: pull | c: checkpoint | Arrows: move | Enter: details | Esc: back | q: quit"), area);
+        frame.render_widget(Paragraph::new("r: remote | p: push | P: pull | c: commit | Shift+D: nuke | Enter: details | Esc: back | q: quit"), area);
         return;
     }
     frame.render_widget(
         Paragraph::new(concat!(
             "0/1/2/3: section | Arrows: move | Enter: open | a: add | e: edit | ",
-            "Space: complete | m: move | c: checkpoint | d: delete | Esc: back/cancel | q: quit | ",
+            "Space: complete | m: move | c: checkpoint | d: delete | Shift+D: nuke | Esc: back/cancel | q: quit | ",
             "Ctrl+K: search tasks/actions",
         )),
         area,
@@ -240,6 +240,10 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
         Mode::ProjectEdit(id, text) => (
             if id.is_some() { " Rename project " } else { " Add project " },
             format!("{text}▏\nEnter: save · Esc: cancel\n{}", app.message),
+        ),
+        Mode::Nuke { tasks, projects, commits } => (
+            " Nuke tasks, projects AND local history? ",
+            format!("All {tasks} tasks, {projects} projects and {commits} local commits will be deleted.\nRemote settings deleted; backups and remote repo stay intact.\ny/Enter: confirm · n/Esc: cancel\n{}", app.message),
         ),
         Mode::ProjectDelete(_) => (
             " Delete project AND its tasks? ",

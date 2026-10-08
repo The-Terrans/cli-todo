@@ -159,6 +159,34 @@ impl History {
         Ok("Todo snapshot committed".into())
     }
 
+    pub fn nuke(&self, database: &Connection) -> Result<()> {
+        if !self.directory.try_exists()? {
+            return crate::db::nuke(database);
+        }
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_nanos();
+        let staged = self
+            .directory
+            .with_file_name(format!(".nuke-history-{stamp}"));
+        // Keep history recoverable until the database transaction succeeds.
+        fs::rename(&self.directory, &staged)?;
+        if let Err(error) = crate::db::nuke(database) {
+            if let Err(restore) = fs::rename(&staged, &self.directory) {
+                return Err(format!("Database deletion failed: {error}; history restore failed: {restore}. History remains at {}", staged.display()).into());
+            }
+            return Err(error);
+        }
+        if let Err(error) = fs::remove_dir_all(&staged) {
+            let remaining = match fs::rename(&staged, &self.directory) {
+                Ok(()) => self.directory.clone(),
+                Err(_) => staged,
+            };
+            return Err(format!("Tasks and projects deleted, but history cleanup failed: {error}. Remaining files: {}", remaining.display()).into());
+        }
+        Ok(())
+    }
+
     pub fn remote(&self) -> Result<String> {
         if !self.directory.join(".git").exists() {
             return Ok(String::new());

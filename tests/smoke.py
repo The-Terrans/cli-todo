@@ -51,7 +51,10 @@ with tempfile.TemporaryDirectory() as data:
     proc, master, slave, before = launch()
     try:
         first = screen()
-        assert b"Inbox" in first and b"Tasks" in first and b"0/1/2/3: section" in first
+        deadline = time.monotonic() + 5
+        while not all(text in first for text in [b"Inbox", b"Tasks", b"0/1/2/3: section"]):
+            assert time.monotonic() < deadline, "initial frame did not render"
+            first += b" " + screen()
         assert b"Title cannot be empty" in send(b"a\r")
         send(b"first\r")
         assert rows() == [("first", 0)]
@@ -148,13 +151,31 @@ with tempfile.TemporaryDirectory() as data:
         screen()
         assert b"second checkpoint" in send(b"3")
         send(b"1\r ")
+        send(b"2aClear me\r\raproject to clear\r")
+        assert b"AND local history?" in send(b"D")
+        send(b"\x1b")
+        assert len(rows()) == 2
+        send(b"Dn")
+        assert len(rows()) == 2
+        send(b"D\r")
+        assert rows() == []
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT count(*) FROM projects").fetchone()[0] == 0
+        assert not history.exists(), "local commits and remote configuration were not removed"
+        assert subprocess.check_output(["git", "-C", str(remote), "rev-parse", "HEAD"]).strip() == head, "nuke changed the remote repository"
+        send(b"q")
+        finish(0)
+        proc, master, slave, before = launch()
+        screen()
+        assert rows() == []
+        send(b"apreserved\r")
         with sqlite3.connect(dbpath) as db:
             db.execute("CREATE TRIGGER fail_insert BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT, 'smoke forced error'); END")
         output = send(b"afailure\r")
         assert b"smoke forced error" in output
         finish(1)
         assert rows() == [("preserved", 0)]
-        print("PASS: PTY navigation, palette, projects, checkpoints, remote setup/push/pull, persistence, terminal restoration")
+        print("PASS: PTY navigation, palette, projects, checkpoints, remote setup/push/pull, confirmed nuke, persistence, terminal restoration")
     finally:
         if proc.poll() is None:
             proc.kill()

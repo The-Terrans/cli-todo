@@ -26,6 +26,7 @@ Without Nix, install Git, a Rust toolchain, pkg-config, and SQLite development l
 | e                            | Edit task; in Projects section, rename project            |
 | Space                        | Toggle completion in main panel                          |
 | d                            | Request task/project deletion in its section              |
+| Shift+D while browsing       | Confirm deletion of tasks, projects, local history and remote settings |
 | m in Tasks                   | Move task to Inbox or a project; arrows and Enter choose  |
 | c in Commits                 | Enter a message and commit a safe todo SQLite snapshot    |
 | r in Commits                 | Set/change origin URL; empty input removes it             |
@@ -35,7 +36,7 @@ Without Nix, install Git, a Rust toolchain, pkg-config, and SQLite development l
 | Enter in text entry          | Save title (empty/whitespace-only titles rejected)       |
 | Backspace in text entry      | Remove last character                                    |
 | Esc in text entry            | Discard changes                                          |
-| q outside text entry/palette | Quit                                                     |
+| q while browsing             | Quit                                                     |
 | Ctrl+K while browsing        | Open searchable command palette                          |
 
 Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Editing is intentionally append/backspace only. Long titles remain stored but may be clipped by terminal width. Use a terminal at least 80 columns wide for the full help text.
@@ -47,6 +48,12 @@ The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to
 New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** from Tasks returns to its navigation section. Tab remains disabled.
 
 **Deleting a project permanently deletes all its tasks**, after explicit confirmation. Esc/n cancels. Existing databases migrate automatically, preserving old tasks in Inbox.
+
+## Nuke todo data
+
+Press **Shift+D** from any browsing panel to open a confirmation showing task, project, and local commit counts. **y/Enter** deletes **all tasks, projects, local Git checkpoints, and remote settings**, including tasks outside the current view. **n/Esc** cancels. This removes only the dedicated todo-history repository, never the app source repository or global Git configuration.
+
+**Existing backups and the remote repository itself remain untouched.** Nuke does not create a backup automatically. If you need a fresh backup, quit and copy the live database before nuking; local checkpoints will also be deleted. Task/project deletion runs in one SQLite transaction, with history staged until that succeeds. Errors stay in the dialog; filesystem cleanup failures identify any remaining history files. After confirmation, focus returns to an empty Inbox with no commits or configured remote. Nuke is disabled while syncing, and Shift+D remains ordinary text in editing dialogs.
 
 ## Todo commits
 
@@ -95,6 +102,6 @@ python3 tests/smoke.py
 
 Unit tests verify Push/Pull against temporary local Git remotes, including dirty-data refusal, divergence, malformed snapshots, and rollback after an injected Git failure. These checks do not contact GitHub.
 
-The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, SQLite checkpoints and persisted Git history, add/edit/complete/delete, cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
+The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, SQLite checkpoints and persisted Git history, add/edit/complete/delete, confirmed nuke and cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
 
 Verified in this workspace: Nix shell (Cargo 1.98.0, Rust 1.98.1, SQLite 3.53.3), formatting, unit test, Clippy, build, and PTY smoke test passed.
