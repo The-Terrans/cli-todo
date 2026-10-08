@@ -52,9 +52,18 @@ with tempfile.TemporaryDirectory() as data:
     try:
         first = screen()
         deadline = time.monotonic() + 5
-        while not all(text in first for text in [b"Inbox", b"Tasks", b"0/1/2/3: section"]):
+        while not all(text in first for text in [b"Inbox", b"Tasks", b"?: keybindings"]):
             assert time.monotonic() < deadline, "initial frame did not render"
             first += b" " + screen()
+        assert b"Keybindings" in send(b"?")
+        send(b"\x1b[F")
+        send(b"\x1b[H")
+        send(b"?")
+        send(b"?")
+        send(b"q")
+        assert proc.poll() is None, "help should not execute browsing shortcuts"
+        send(b"\x1b")
+        assert rows() == []
         assert b"Title cannot be empty" in send(b"a\r")
         send(b"first\r")
         assert rows() == [("first", 0)]
@@ -76,7 +85,7 @@ with tempfile.TemporaryDirectory() as data:
         finish(0)
         proc, master, slave, before = launch()
         assert b"first!" in screen()
-        send(b"\rdy")
+        send(b"\rd\r")
         assert rows() == []
         assert b"Commands" in send(b"\x0b")
         assert b"No matching tasks or actions" in send(b"zzzz")
@@ -91,9 +100,10 @@ with tempfile.TemporaryDirectory() as data:
         send(b"\x0breopen\r")
         assert rows() == [("palette task!", 1)]
         assert b"Delete task?" in send(b"\x0bdelete\r")
-        send(b"n")
+        send(b"yn")
         assert len(rows()) == 1
-        send(b"\x0bdelete\ry")
+        send(b"\x1b")
+        send(b"\x0bdelete\r\r")
         assert rows() == []
         send(b"2aWork\r")
         assert b"Work" in send(b"\r")
@@ -103,16 +113,20 @@ with tempfile.TemporaryDirectory() as data:
         send(b"m\x1b[B\r")
         send(b"2e!\r")
         assert b"project AND its tasks" in send(b"d")
-        send(b"n")
+        send(b"yn")
         assert rows() == [("project task", 0)]
-        send(b"dy")
+        send(b"\x1b")
+        send(b"d\r")
         assert rows() == []
         send(b"1apreserved\r")
         assert b"No todo commits" in send(b"3")
         assert b"Commit message cannot be empty" in send(b"c\r")
         send(b"\x1b")
         committed = send(b"cfirst checkpoint\r")
-        assert b"snapshot committed" in committed
+        deadline = time.monotonic() + 10
+        while b"snapshot committed" not in committed:
+            assert time.monotonic() < deadline, f"checkpoint did not finish: {committed!r}"
+            committed += b" " + screen()
         assert b"Author:" in committed
         notification = send(b"c")
         assert b"changes to commit" in notification, notification
@@ -124,7 +138,10 @@ with tempfile.TemporaryDirectory() as data:
         send(b"\x1b")
         send(b"1\r ")
         send(b"3csecond checkpoint\r")
-        assert subprocess.check_output(["git", "-C", str(history), "rev-list", "--count", "HEAD"]).strip() == b"2"
+        deadline = time.monotonic() + 10
+        while subprocess.check_output(["git", "-C", str(history), "rev-list", "--count", "HEAD"]).strip() != b"2":
+            assert time.monotonic() < deadline, "second checkpoint did not finish"
+            screen()
         remote = Path(data) / "remote.git"
         branch = subprocess.check_output(["git", "-C", str(history), "symbolic-ref", "--short", "HEAD"]).decode().strip()
         subprocess.run(["git", "init", "--bare", "--quiet", f"--initial-branch={branch}", str(remote)], check=True)
@@ -176,7 +193,7 @@ with tempfile.TemporaryDirectory() as data:
         assert b"smoke forced error" in output
         finish(1)
         assert rows() == [("preserved", 0)]
-        print("PASS: PTY navigation, palette, projects, checkpoints, remote setup/push/pull, confirmed nuke, persistence, terminal restoration")
+        print("PASS: PTY keybindings help, navigation, palette, projects, checkpoints, sync, nuke, persistence, terminal restoration")
     finally:
         if proc.poll() is None:
             proc.kill()

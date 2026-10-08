@@ -35,16 +35,21 @@ fn run(app: &mut App) -> Result<()> {
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
+    app.resize(terminal.size()?.height);
     loop {
         app.poll_sync();
         terminal.draw(|frame| ui::draw(frame, app))?;
         if !event::poll(Duration::from_millis(100))? {
             continue;
         }
-        if let Event::Key(key) = event::read()? {
-            if app.handle_key_event(key)? {
-                return Ok(());
+        match event::read()? {
+            Event::Key(key) => {
+                if app.handle_key_event(key)? {
+                    return Ok(());
+                }
             }
+            Event::Resize(_, height) => app.resize(height),
+            _ => {}
         }
     }
 }

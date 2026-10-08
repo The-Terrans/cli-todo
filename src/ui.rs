@@ -1,4 +1,4 @@
-use crate::app::{App, Mode, FILTERS};
+use crate::app::{App, Mode, FILTERS, KEYBINDINGS};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
@@ -31,7 +31,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     } else {
         draw_tasks(frame, panels[2], app);
     }
-    draw_help(frame, areas[1], app);
+    draw_footer(frame, areas[1], app);
     draw_dialog(frame, app);
 }
 
@@ -202,25 +202,21 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
-    if !app.message.is_empty() {
-        frame.render_widget(
-            Paragraph::new(app.message.lines().next().unwrap_or(""))
-                .style(Style::default().fg(Color::Cyan)),
-            area,
-        );
-        return;
-    }
-    if app.commits_focused {
-        frame.render_widget(Paragraph::new("r: remote | p: push | P: pull | c: commit | Shift+D: nuke | Enter: details | Esc: back | q: quit"), area);
-        return;
-    }
+fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
+    let text = if app.message.is_empty() {
+        "?: keybindings".into()
+    } else {
+        format!(
+            "?: keybindings | {}",
+            app.message.lines().next().unwrap_or("")
+        )
+    };
     frame.render_widget(
-        Paragraph::new(concat!(
-            "0/1/2/3: section | Arrows: move | Enter: open | a: add | e: edit | ",
-            "Space: complete | m: move | c: checkpoint | d: delete | Shift+D: nuke | Esc: back/cancel | q: quit | ",
-            "Ctrl+K: search tasks/actions",
-        )),
+        Paragraph::new(text).style(Style::default().fg(if app.message.is_empty() {
+            Color::Gray
+        } else {
+            Color::Cyan
+        })),
         area,
     );
 }
@@ -228,24 +224,36 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_dialog(frame: &mut Frame, app: &App) {
     let (title, text) = match &app.mode {
         Mode::Browse => return,
+        Mode::Help { .. } => return draw_keybindings(frame, app),
         Mode::Palette { .. } => return draw_palette(frame, app),
         Mode::Move { .. } => return draw_move_dialog(frame, app),
         Mode::RemoteEdit(text) => (
             " Todo remote (origin) ",
-            format!("{text}▏\nEnter: save · blank removes origin · Esc: cancel\n{}", app.message),
+            format!(
+                "{text}▏\nEnter: save · blank removes origin · Esc: cancel\n{}",
+                app.message
+            ),
         ),
         Mode::CommitEdit(text) => (
             " Commit todo snapshot ",
-            format!("{text}▏\nEnter: commit SQLite snapshot · Esc: cancel\n{}", app.message),
+            format!(
+                "{text}▏\nEnter: commit SQLite snapshot · Esc: cancel\n{}",
+                app.message
+            ),
         ),
         Mode::ProjectEdit(id, text) => (
-            if id.is_some() { " Rename project " } else { " Add project " },
+            if id.is_some() {
+                " Rename project "
+            } else {
+                " Add project "
+            },
             format!("{text}▏\nEnter: save · Esc: cancel\n{}", app.message),
         ),
         Mode::Nuke { .. } => return draw_nuke_dialog(frame, app),
         Mode::ProjectDelete(_) => (
             " Delete project AND its tasks? ",
-            "All tasks in this project will be permanently deleted.\ny/Enter: confirm · n/Esc: cancel".into(),
+            "All tasks in this project will be permanently deleted.\nEnter: confirm · Esc: cancel"
+                .into(),
         ),
         Mode::Edit(id, text) => (
             if id.is_some() {
@@ -257,12 +265,48 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
         ),
         Mode::Delete(_) => (
             " Delete task? ",
-            "Permanently delete selected task?\ny/Enter: confirm · n/Esc: cancel".into(),
+            "Permanently delete selected task?\nEnter: confirm · Esc: cancel".into(),
         ),
     };
     let area = dialog_area(frame.area(), 6);
     frame.render_widget(Clear, area);
     frame.render_widget(Paragraph::new(text).block(panel(title, true)), area);
+}
+
+fn draw_keybindings(frame: &mut Frame, app: &App) {
+    let Mode::Help { scroll } = app.mode else {
+        return;
+    };
+    let area = frame.area().inner(Margin::new(2, 1));
+    let lines: Vec<_> = KEYBINDINGS
+        .iter()
+        .map(|text| {
+            if !text.is_empty() && !text.starts_with(' ') {
+                Line::styled(
+                    *text,
+                    Style::default()
+                        .fg(Color::LightYellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Line::raw(*text)
+            }
+        })
+        .collect();
+    let block = panel(" Keybindings ", true)
+        .border_type(BorderType::Rounded)
+        .title_bottom(
+            Line::styled(
+                " Up/Down: scroll ── ?/Esc: close ",
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .bg(Color::Reset)
+                    .remove_modifier(Modifier::BOLD),
+            )
+            .alignment(Alignment::Right),
+        );
+    frame.render_widget(Clear, area);
+    frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)).block(block), area);
 }
 
 fn draw_nuke_dialog(frame: &mut Frame, app: &App) {
@@ -391,6 +435,62 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{backend::TestBackend, Terminal};
     use std::path::Path;
+
+    #[test]
+    fn footer_is_compact_and_help_is_readable_in_a_short_terminal() -> Result<()> {
+        let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+        let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+        for section in ['1', '2', '3', '0'] {
+            app.handle_key_event(KeyEvent::new(KeyCode::Char(section), KeyModifiers::NONE))?;
+            terminal.draw(|frame| draw(frame, &app))?;
+            let footer: String = terminal.backend().buffer().content[2400..2500]
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert_eq!(footer.trim(), "?: keybindings");
+        }
+        app.message = "Sync failed: example".into();
+        terminal.draw(|frame| draw(frame, &app))?;
+        let footer: String = terminal.backend().buffer().content[2400..2500]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(footer.contains("?: keybindings | Sync failed: example"));
+        app.resize(12);
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT))?;
+        let mut terminal = Terminal::new(TestBackend::new(80, 12))?;
+        terminal.draw(|frame| draw(frame, &app))?;
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Keybindings") && text.contains("BROWSING"));
+        assert!(text.contains("?/Esc: close"));
+        app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::NONE))?;
+        terminal.draw(|frame| draw(frame, &app))?;
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Tab") && text.contains("Disabled"));
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))?;
+        terminal.draw(|frame| draw(frame, &app))?;
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(!text.contains("Keybindings"));
+        Ok(())
+    }
 
     #[test]
     fn nuke_warning_is_one_red_line_with_confirmation_in_bottom_border() -> Result<()> {

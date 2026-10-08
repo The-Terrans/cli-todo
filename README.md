@@ -15,8 +15,11 @@ Without Nix, install Git, a Rust toolchain, pkg-config, and SQLite development l
 
 ## Controls
 
+Press **?** while browsing for a scrollable list of all keybindings. **Up/Down** scroll, **PageUp/PageDown** move a page, and **Home/End** jump to the beginning/end. **?** or **Esc** closes help without changing focus. In text entry and search, `?` remains ordinary input. The app footer shows only `?: keybindings` plus any notification.
+
 | Key                          | Action                                                   |
 | ---------------------------- | -------------------------------------------------------- |
+| ? while browsing             | Open keybindings help; ?/Esc closes it                    |
 | Esc while browsing           | Return from Tasks to its navigation section; no effect on left           |
 | 0 / 1 / 2 / 3 while browsing | Focus right preview / Inbox / Projects / Commits          |
 | Left / Right in left panel   | Cycle Inbox → Projects → Commits with wraparound; left reverses                |
@@ -31,15 +34,17 @@ Without Nix, install Git, a Rust toolchain, pkg-config, and SQLite development l
 | c in Commits                 | Enter a message and commit a safe todo SQLite snapshot    |
 | r in Commits                 | Set/change origin URL; empty input removes it             |
 | p / P in Commits             | Push checkpoints / safely pull and apply a snapshot       |
-| y / Enter in deletion dialog | Confirm permanent deletion                               |
-| n / Esc in deletion dialog   | Cancel deletion                                          |
+| Enter in deletion dialog     | Confirm permanent deletion                               |
+| Esc in deletion dialog       | Cancel deletion                                          |
 | Enter in text entry          | Save title (empty/whitespace-only titles rejected)       |
 | Backspace in text entry      | Remove last character                                    |
 | Esc in text entry            | Discard changes                                          |
 | q while browsing             | Quit                                                     |
 | Ctrl+K while browsing        | Open searchable command palette                          |
 
-Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Editing is intentionally append/backspace only. Long titles remain stored but may be clipped by terminal width. Use a terminal at least 80 columns wide for the full help text.
+All deletion confirmations use only **Enter** to confirm and **Esc** to cancel; y/n and q do nothing in these dialogs.
+
+Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Editing is intentionally append/backspace only. Long titles remain stored but may be clipped by terminal width. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
 
 ## Projects
 
@@ -47,7 +52,7 @@ The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to
 
 New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** from Tasks returns to its navigation section. Tab remains disabled.
 
-**Deleting a project permanently deletes all its tasks**, after explicit confirmation. Esc/n cancels. Existing databases migrate automatically, preserving old tasks in Inbox.
+**Deleting a project permanently deletes all its tasks**, after explicit confirmation. Esc cancels. Existing databases migrate automatically, preserving old tasks in Inbox.
 
 ## Nuke todo data
 
@@ -102,6 +107,6 @@ python3 tests/smoke.py
 
 Unit tests verify Push/Pull against temporary local Git remotes, including dirty-data refusal, divergence, malformed snapshots, and rollback after an injected Git failure. These checks do not contact GitHub.
 
-The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, SQLite checkpoints and persisted Git history, add/edit/complete/delete, confirmed nuke and cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
+The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks keybindings help, keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, SQLite checkpoints and persisted Git history, add/edit/complete/delete, confirmed nuke and cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
 
 Verified in this workspace: Nix shell (Cargo 1.98.0, Rust 1.98.1, SQLite 3.53.3), formatting, unit test, Clippy, build, and PTY smoke test passed.

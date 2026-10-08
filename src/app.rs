@@ -14,6 +14,53 @@ pub const FILTERS: [(&str, Filter); 3] = [
     ("Completed", Filter::Completed),
 ];
 
+pub const KEYBINDINGS: &[&str] = &[
+    "BROWSING",
+    "  ?             Open keybindings help",
+    "  0             Focus the right preview",
+    "  1 / 2 / 3     Focus Inbox / Projects / Commits",
+    "  Up / Down     Move selection; scroll commit details",
+    "  Left / Right  Cycle sidebar sections (left panel only)",
+    "  Enter         Open preview; edit a task in Tasks",
+    "  Esc           Return to sidebar; no effect when already there",
+    "  Ctrl+K        Search tasks and actions",
+    "  q             Quit; wait for sync to finish first",
+    "",
+    "TASKS AND PROJECTS",
+    "  a             Add task; add project in Projects",
+    "  e             Edit task; rename project in Projects",
+    "  Space         Complete/reopen task (Tasks only)",
+    "  d             Delete task/project with confirmation",
+    "  m             Move task to Inbox/project (Tasks only)",
+    "  Shift+D       Nuke all data, local commits and remote settings",
+    "",
+    "COMMITS (LEFT PANEL)",
+    "  c             Create a SQLite checkpoint",
+    "  r             Set/change/remove origin",
+    "  p             Push committed snapshots",
+    "  Shift+P       Safely pull and apply the latest snapshot",
+    "",
+    "TEXT ENTRY, SEARCH AND MOVE",
+    "  Typing        Append text/search, including ? and shortcut letters",
+    "  Backspace     Remove last character",
+    "  Enter         Save text; run search result; choose move destination",
+    "  Up / Down     Choose search result or move destination",
+    "  Esc           Cancel dialog/search/move",
+    "  Ctrl+K        Close palette; does not interrupt other dialogs",
+    "  Empty origin  Save empty input to remove remote settings",
+    "",
+    "CONFIRMATIONS",
+    "  Enter         Confirm task/project deletion or nuke",
+    "  Esc           Cancel task/project deletion or nuke",
+    "",
+    "KEYBINDINGS HELP",
+    "  Up / Down     Scroll one line",
+    "  PageUp/Down   Scroll one page",
+    "  Home / End    Jump to first/last page",
+    "  ? / Esc       Close help; return to the previous focus",
+    "  Tab           Disabled",
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Add,
@@ -40,6 +87,9 @@ const ACTIONS: [(&str, Action); 9] = [
 
 pub enum Mode {
     Browse,
+    Help {
+        scroll: u16,
+    },
     Edit(Option<i64>, String),
     Delete(i64),
     Nuke {
@@ -78,6 +128,7 @@ pub struct App {
     pub selected_commit: usize,
     pub commit_details: String,
     pub detail_scroll: u16,
+    help_page_size: u16,
     pub selected_task: usize,
     pub navigation_focused: bool,
     pub selected_filter: usize,
@@ -103,6 +154,7 @@ impl App {
             selected_commit: 0,
             commit_details: String::new(),
             detail_scroll: 0,
+            help_page_size: 20,
             selected_task: 0,
             navigation_focused: true,
             selected_filter: 0,
@@ -115,6 +167,38 @@ impl App {
         app.load_remote();
         app.update_commit_status();
         Ok(app)
+    }
+
+    pub fn resize(&mut self, height: u16) {
+        self.help_page_size = height.saturating_sub(4).max(1);
+        let maximum = self.max_help_scroll();
+        if let Mode::Help { scroll } = &mut self.mode {
+            *scroll = (*scroll).min(maximum);
+        }
+    }
+
+    fn max_help_scroll(&self) -> u16 {
+        KEYBINDINGS
+            .len()
+            .saturating_sub(self.help_page_size as usize) as u16
+    }
+
+    fn handle_help_key(&mut self, key: KeyCode) {
+        let maximum = self.max_help_scroll();
+        let page = self.help_page_size;
+        let Mode::Help { scroll } = &mut self.mode else {
+            return;
+        };
+        match key {
+            KeyCode::Esc | KeyCode::Char('?') => self.mode = Mode::Browse,
+            KeyCode::Up => *scroll = scroll.saturating_sub(1),
+            KeyCode::Down => *scroll = scroll.saturating_add(1).min(maximum),
+            KeyCode::PageUp => *scroll = scroll.saturating_sub(page),
+            KeyCode::PageDown => *scroll = scroll.saturating_add(page).min(maximum),
+            KeyCode::Home => *scroll = 0,
+            KeyCode::End => *scroll = maximum,
+            _ => {}
+        }
     }
 
     fn refresh_tasks(&mut self) -> Result<()> {
@@ -160,16 +244,17 @@ impl App {
         self.message.clear();
         if key == KeyCode::Char('q')
             && self.sync_receiver.is_some()
-            && matches!(self.mode, Mode::Browse | Mode::Delete(_))
+            && matches!(self.mode, Mode::Browse)
         {
             self.message = "Sync is in progress; wait before quitting".into();
             return Ok(false);
         }
-        if key == KeyCode::Char('q') && matches!(self.mode, Mode::Browse | Mode::Delete(_)) {
+        if key == KeyCode::Char('q') && matches!(self.mode, Mode::Browse) {
             return self.execute_action(Action::Quit);
         }
         match self.mode {
             Mode::Browse => self.handle_browse_key(key)?,
+            Mode::Help { .. } => self.handle_help_key(key),
             Mode::Edit(..) => self.handle_edit_key(key)?,
             Mode::Delete(id) => self.handle_delete_key(key, id)?,
             Mode::Nuke { .. } => self.handle_nuke_key(key)?,
@@ -185,6 +270,7 @@ impl App {
 
     fn handle_browse_key(&mut self, key: KeyCode) -> Result<()> {
         match key {
+            KeyCode::Char('?') => self.mode = Mode::Help { scroll: 0 },
             KeyCode::Char('D') => self.begin_nuke()?,
             KeyCode::Char('0') => self.navigation_focused = false,
             KeyCode::Char('1') => self.focus_inbox()?,
@@ -513,7 +599,7 @@ impl App {
         let message = match result {
             SyncResult::Message(message) => message,
             SyncResult::Pull(plan) => {
-                if !matches!(self.mode, Mode::Browse) {
+                if !matches!(self.mode, Mode::Browse | Mode::Help { .. }) {
                     return Err(
                         "Finish or cancel the open dialog before applying a pull; retry afterward"
                             .into(),
@@ -884,7 +970,7 @@ impl App {
 
     fn handle_project_delete_key(&mut self, key: KeyCode, id: i64) -> Result<()> {
         match key {
-            KeyCode::Enter | KeyCode::Char('y') => {
+            KeyCode::Enter => {
                 db::delete_project(&self.db, id)?;
                 if self.current_project == Some(id) {
                     self.current_project = None;
@@ -892,7 +978,7 @@ impl App {
                 self.mode = Mode::Browse;
                 self.refresh_projects()?;
             }
-            KeyCode::Esc | KeyCode::Char('n') => self.mode = Mode::Browse,
+            KeyCode::Esc => self.mode = Mode::Browse,
             _ => {}
         }
         Ok(())
@@ -922,12 +1008,12 @@ impl App {
 
     fn handle_delete_key(&mut self, key: KeyCode, id: i64) -> Result<()> {
         match key {
-            KeyCode::Char('y') | KeyCode::Enter => {
+            KeyCode::Enter => {
                 db::delete_task(&self.db, id)?;
                 self.mode = Mode::Browse;
                 self.refresh_tasks()?;
             }
-            KeyCode::Esc | KeyCode::Char('n') => self.mode = Mode::Browse,
+            KeyCode::Esc => self.mode = Mode::Browse,
             _ => {}
         }
         Ok(())
@@ -951,6 +1037,77 @@ mod tests {
                 !app.handle_key_event(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))?
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn keybindings_help_scrolls_closes_and_preserves_focus_and_text_entry() -> Result<()> {
+        let mut app = app()?;
+        db::save_project(&app.db, None, "Work")?;
+        db::create_task(&app.db, "project task", Some(app.db.last_insert_rowid()))?;
+        app.refresh_projects()?;
+        app.resize(10);
+        for section in ['1', '2', '0', '3'] {
+            app.handle_key(KeyCode::Char(section))?;
+            let focus = (
+                app.navigation_focused,
+                app.projects_focused,
+                app.commits_focused,
+                app.current_project,
+                app.selected_task,
+                app.selected_project,
+                app.selected_filter,
+            );
+            app.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT))?;
+            assert!(matches!(app.mode, Mode::Help { scroll: 0 }));
+            app.handle_key(KeyCode::Down)?;
+            app.handle_key(KeyCode::PageDown)?;
+            assert!(matches!(app.mode, Mode::Help { scroll: 7 }));
+            app.handle_key(KeyCode::PageUp)?;
+            app.handle_key(KeyCode::Up)?;
+            app.handle_key(KeyCode::Up)?;
+            assert!(matches!(app.mode, Mode::Help { scroll: 0 }));
+            app.handle_key(KeyCode::End)?;
+            app.handle_key(KeyCode::Down)?;
+            assert!(
+                matches!(app.mode, Mode::Help { scroll } if scroll == (KEYBINDINGS.len() - 6) as u16)
+            );
+            app.handle_key(KeyCode::Home)?;
+            for ignored in ['q', 'D', 'r', 'p', '1'] {
+                assert!(!app.handle_key(KeyCode::Char(ignored))?);
+                assert!(matches!(app.mode, Mode::Help { .. }));
+            }
+            app.handle_key(KeyCode::Char('?'))?;
+            assert!(matches!(app.mode, Mode::Browse));
+            assert_eq!(
+                focus,
+                (
+                    app.navigation_focused,
+                    app.projects_focused,
+                    app.commits_focused,
+                    app.current_project,
+                    app.selected_task,
+                    app.selected_project,
+                    app.selected_filter
+                )
+            );
+        }
+        app.handle_key(KeyCode::Char('?'))?;
+        app.handle_key(KeyCode::End)?;
+        app.resize(100);
+        assert!(matches!(app.mode, Mode::Help { scroll: 0 }));
+        app.handle_key(KeyCode::Esc)?;
+        app.handle_key(KeyCode::Char('2'))?;
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Char('?'))?;
+        assert!(matches!(&app.mode, Mode::ProjectEdit(None, text) if text == "?"));
+        app.handle_key(KeyCode::Esc)?;
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))?;
+        app.handle_key(KeyCode::Char('?'))?;
+        assert!(matches!(&app.mode, Mode::Palette { query, .. } if query == "?"));
+        app.handle_key(KeyCode::Esc)?;
+        assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 1);
+        assert_eq!(db::list_projects(&app.db)?.len(), 1);
         Ok(())
     }
 
@@ -1082,10 +1239,13 @@ mod tests {
         assert!(app.message.contains("Wait for sync"));
         assert!(!app.handle_key(KeyCode::Char('q'))?);
         app.handle_key(KeyCode::Char('1'))?;
+        app.handle_key(KeyCode::Char('?'))?;
         wait_for_sync(&mut app);
         assert_eq!(app.tasks[0].title, "remote task", "{}", app.message);
         assert!(!app.uncommitted_changes);
         assert!(app.message.contains("pulled and applied"));
+        assert!(matches!(app.mode, Mode::Help { .. }));
+        app.handle_key(KeyCode::Esc)?;
         app.handle_key(KeyCode::Char('3'))?;
         app.handle_key(KeyCode::Char('p'))?;
         wait_for_sync(&mut app);
@@ -1333,7 +1493,12 @@ mod tests {
         app.handle_key(KeyCode::Esc)?;
         assert_eq!(app.projects.len(), 1);
         app.handle_key(KeyCode::Char('d'))?;
-        app.handle_key(KeyCode::Char('y'))?;
+        for ignored in ['y', 'n', 'q'] {
+            assert!(!app.handle_key(KeyCode::Char(ignored))?);
+            assert!(matches!(app.mode, Mode::ProjectDelete(_)));
+            assert_eq!(app.projects.len(), 1);
+        }
+        app.handle_key(KeyCode::Enter)?;
         assert!(app.projects.is_empty());
         assert_eq!(app.current_project, None);
         assert!(app.tasks.is_empty());
@@ -1477,7 +1642,7 @@ mod tests {
         app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))?;
         assert!(matches!(app.mode, Mode::Delete(_)));
         assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 1);
-        app.handle_key(KeyCode::Char('n'))?;
+        app.handle_key(KeyCode::Esc)?;
         search_actions(&mut app, "delete")?;
         app.handle_key(KeyCode::Enter)?;
         app.handle_key(KeyCode::Enter)?;
@@ -1633,14 +1798,16 @@ mod tests {
         app.handle_key(KeyCode::Char('d'))?;
         assert!(matches!(app.mode, Mode::Browse));
         app.handle_key(KeyCode::Enter)?;
-        for cancel in [KeyCode::Esc, KeyCode::Char('n')] {
-            app.handle_key(KeyCode::Char('d'))?;
-            app.handle_key(cancel)?;
-            assert!(matches!(app.mode, Mode::Browse));
+        app.handle_key(KeyCode::Char('d'))?;
+        for ignored in ['y', 'n', 'q'] {
+            assert!(!app.handle_key(KeyCode::Char(ignored))?);
+            assert!(matches!(app.mode, Mode::Delete(_)));
             assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 1);
         }
+        app.handle_key(KeyCode::Esc)?;
+        assert!(matches!(app.mode, Mode::Browse));
+        assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 1);
         app.handle_key(KeyCode::Char('d'))?;
-        assert!(app.handle_key(KeyCode::Char('q'))?);
         app.handle_key(KeyCode::Enter)?;
         assert!(app.tasks.is_empty());
         assert_eq!(app.selected_task, 0);
