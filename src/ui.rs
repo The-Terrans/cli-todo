@@ -2,7 +2,7 @@ use crate::app::{App, Mode, TaskDraft, FILTERS, KEYBINDINGS};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph,
         Wrap,
@@ -37,16 +37,29 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 fn panel(title: &str, focused: bool) -> Block<'_> {
+    let border = if focused {
+        Style::default()
+            .fg(Color::LightYellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let title = match title
+        .strip_prefix('─')
+        .and_then(|rest| rest.split_once('─'))
+    {
+        Some((shortcut, label)) => Line::from(vec![
+            Span::styled("─", border.bg(Color::Reset)),
+            Span::raw(shortcut),
+            Span::styled("─", border.bg(Color::Reset)),
+            Span::raw(label),
+        ]),
+        None => Line::raw(title),
+    };
     Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(if focused {
-            Style::default()
-                .fg(Color::LightYellow)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        })
+        .border_style(border)
         .title_style(if focused {
             selection_style()
         } else {
@@ -1006,6 +1019,39 @@ mod tests {
     }
 
     #[test]
+    fn section_title_separators_match_the_border_in_every_focus_state() -> Result<()> {
+        let db = db::open(Path::new(":memory:"))?;
+        db::save_project(&db, None, "Work─Home")?;
+        let mut app = App::new(db)?;
+        let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+        for key in ['1', '0', '2', '0', '3', '0'] {
+            app.handle_key_event(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE))?;
+            terminal.draw(|frame| draw(frame, &app))?;
+            let buffer = terminal.backend().buffer();
+            for (x, y) in [(0, 0), (0, 8), (0, 16), (25, 0)] {
+                let border = &buffer[(x, y)];
+                for offset in [1, 5] {
+                    let separator = &buffer[(x + offset, y)];
+                    assert_eq!(separator.symbol(), "─");
+                    assert_eq!(separator.fg, border.fg, "section {key} at ({x}, {y})");
+                    assert_eq!(separator.bg, border.bg);
+                    assert_eq!(separator.modifier, border.modifier);
+                }
+                let label = &buffer[(x + 6, y)];
+                assert_eq!(
+                    label.bg,
+                    if border.fg == Color::LightYellow {
+                        Color::LightYellow
+                    } else {
+                        Color::Reset
+                    }
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn empty_focused_panels_have_high_contrast_titles_and_borders() -> Result<()> {
         let mut app = App::new(db::open(Path::new(":memory:"))?)?;
         let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
@@ -1019,11 +1065,11 @@ mod tests {
             let buffer = terminal.backend().buffer();
             assert_eq!(buffer[focused].fg, Color::LightYellow, "section {key}");
             assert!(buffer[focused].modifier.contains(Modifier::BOLD));
-            let title = &buffer[(focused.0 + 1, focused.1)];
+            let title = &buffer[(focused.0 + 2, focused.1)];
             assert_eq!(title.fg, Color::Black);
             assert_eq!(title.bg, Color::LightYellow);
             assert_eq!(buffer[inactive].fg, Color::DarkGray);
-            assert_ne!(buffer[(inactive.0 + 1, inactive.1)].bg, Color::LightYellow);
+            assert_ne!(buffer[(inactive.0 + 2, inactive.1)].bg, Color::LightYellow);
         }
         Ok(())
     }
