@@ -152,11 +152,12 @@ with tempfile.TemporaryDirectory() as data:
         assert b"second checkpoint" in send(b"3")
         send(b"1\r ")
         send(b"2aClear me\r\raproject to clear\r")
-        assert b"AND local history?" in send(b"D")
+        assert b"remote settings?" in send(b"D")
         send(b"\x1b")
         assert len(rows()) == 2
-        send(b"Dn")
+        send(b"Dyn")
         assert len(rows()) == 2
+        send(b"\x1b")
         send(b"D\r")
         assert rows() == []
         with sqlite3.connect(dbpath) as db:

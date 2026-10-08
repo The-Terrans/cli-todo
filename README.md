@@ -51,7 +51,7 @@ New tasks belong to the open project; press **1** to return to Inbox for unassig
 
 ## Nuke todo data
 
-Press **Shift+D** from any browsing panel to open a confirmation showing task, project, and local commit counts. **y/Enter** deletes **all tasks, projects, local Git checkpoints, and remote settings**, including tasks outside the current view. **n/Esc** cancels. This removes only the dedicated todo-history repository, never the app source repository or global Git configuration.
+Press **Shift+D** from any browsing panel to open a confirmation showing task, project, and local commit counts. **Enter** deletes **all tasks, projects, local Git checkpoints, and remote settings**, including tasks outside the current view. **Esc** cancels; y/n have no effect. The confirmation keys appear in the dialog's bottom border. This removes only the dedicated todo-history repository, never the app source repository or global Git configuration.
 
 **Existing backups and the remote repository itself remain untouched.** Nuke does not create a backup automatically. If you need a fresh backup, quit and copy the live database before nuking; local checkpoints will also be deleted. Task/project deletion runs in one SQLite transaction, with history staged until that succeeds. Errors stay in the dialog; filesystem cleanup failures identify any remaining history files. After confirmation, focus returns to an empty Inbox with no commits or configured remote. Nuke is disabled while syncing, and Shift+D remains ordinary text in editing dialogs.
 

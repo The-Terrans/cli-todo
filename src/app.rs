@@ -220,8 +220,8 @@ impl App {
 
     fn handle_nuke_key(&mut self, key: KeyCode) -> Result<()> {
         match key {
-            KeyCode::Esc | KeyCode::Char('n') => self.mode = Mode::Browse,
-            KeyCode::Char('y') | KeyCode::Enter => {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Enter => {
                 let result = match &self.history {
                     Some(history) => history.nuke(&self.db),
                     None => db::nuke(&self.db),
@@ -969,12 +969,7 @@ mod tests {
         )?;
         db::create_task(&app.db, "inbox task", None)?;
         app.refresh_projects()?;
-        for (section, cancel) in [
-            ('1', KeyCode::Esc),
-            ('2', KeyCode::Char('n')),
-            ('3', KeyCode::Esc),
-            ('0', KeyCode::Char('n')),
-        ] {
+        for section in ['1', '2', '3', '0'] {
             app.handle_key(KeyCode::Char(section))?;
             app.handle_key_event(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT))?;
             assert!(matches!(
@@ -985,8 +980,12 @@ mod tests {
                     ..
                 }
             ));
-            assert!(!app.handle_key(KeyCode::Char('q'))?);
-            app.handle_key(cancel)?;
+            for ignored in ['q', 'y', 'n'] {
+                assert!(!app.handle_key(KeyCode::Char(ignored))?);
+                assert!(matches!(app.mode, Mode::Nuke { .. }));
+                assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
+            }
+            app.handle_key(KeyCode::Esc)?;
             assert!(matches!(app.mode, Mode::Browse));
             assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
             assert_eq!(db::list_projects(&app.db)?.len(), 2);
@@ -1006,7 +1005,7 @@ mod tests {
         assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
         assert_eq!(db::list_projects(&app.db)?.len(), 2);
         app.db.execute_batch("DROP TRIGGER prevent_nuke;")?;
-        app.handle_key(KeyCode::Char('y'))?;
+        app.handle_key(KeyCode::Enter)?;
         assert!(matches!(app.mode, Mode::Browse));
         assert!(app.tasks.is_empty() && app.projects.is_empty());
         assert!(db::list_tasks(&app.db, Filter::All)?.is_empty());
@@ -1222,7 +1221,7 @@ mod tests {
             .to_string_lossy()
             .starts_with(".nuke-history-")));
         app.db.execute_batch("DROP TRIGGER prevent_nuke;")?;
-        app.handle_key(KeyCode::Char('y'))?;
+        app.handle_key(KeyCode::Enter)?;
         assert!(app.tasks.is_empty() && app.projects.is_empty());
         assert!(app.commits.is_empty());
         assert!(app.history.as_ref().unwrap().list()?.is_empty());

@@ -1,7 +1,8 @@
 use crate::app::{App, Mode, FILTERS};
 use ratatui::{
-    layout::{Constraint, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
+    text::Line,
     widgets::{
         Block, BorderType, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph,
     },
@@ -241,10 +242,7 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
             if id.is_some() { " Rename project " } else { " Add project " },
             format!("{text}▏\nEnter: save · Esc: cancel\n{}", app.message),
         ),
-        Mode::Nuke { tasks, projects, commits } => (
-            " Nuke tasks, projects AND local history? ",
-            format!("All {tasks} tasks, {projects} projects and {commits} local commits will be deleted.\nRemote settings deleted; backups and remote repo stay intact.\ny/Enter: confirm · n/Esc: cancel\n{}", app.message),
-        ),
+        Mode::Nuke { .. } => return draw_nuke_dialog(frame, app),
         Mode::ProjectDelete(_) => (
             " Delete project AND its tasks? ",
             "All tasks in this project will be permanently deleted.\ny/Enter: confirm · n/Esc: cancel".into(),
@@ -265,6 +263,51 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
     let area = dialog_area(frame.area(), 6);
     frame.render_widget(Clear, area);
     frame.render_widget(Paragraph::new(text).block(panel(title, true)), area);
+}
+
+fn draw_nuke_dialog(frame: &mut Frame, app: &App) {
+    let Mode::Nuke {
+        tasks,
+        projects,
+        commits,
+    } = app.mode
+    else {
+        return;
+    };
+    let mut lines = vec![
+        Line::styled(
+            format!(
+                "Delete {tasks} tasks, {projects} projects, {commits} commits + remote settings?"
+            ),
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::raw("Backups and remote repository are kept."),
+    ];
+    if !app.message.is_empty() {
+        lines.push(Line::styled(
+            app.message.lines().next().unwrap_or(""),
+            Style::default().fg(Color::LightRed),
+        ));
+    }
+    let area = dialog_area(frame.area(), lines.len() as u16 + 2);
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            panel(" Nuke ", true).title_bottom(
+                Line::styled(
+                    "──Enter: confirm ── Esc: cancel ──",
+                    Style::default()
+                        .fg(Color::LightYellow)
+                        .bg(Color::Reset)
+                        .remove_modifier(Modifier::BOLD),
+                )
+                .alignment(Alignment::Right),
+            ),
+        ),
+        area,
+    );
 }
 
 fn draw_move_dialog(frame: &mut Frame, app: &App) {
@@ -348,6 +391,80 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{backend::TestBackend, Terminal};
     use std::path::Path;
+
+    #[test]
+    fn nuke_warning_is_one_red_line_with_confirmation_in_bottom_border() -> Result<()> {
+        let db = db::open(Path::new(":memory:"))?;
+        db::save_task(&db, None, "task")?;
+        db::save_project(&db, None, "Work")?;
+        let mut app = App::new(db)?;
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT))?;
+        for width in [80, 100] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 25))?;
+            terminal.draw(|frame| draw(frame, &app))?;
+            let rows: Vec<_> = terminal
+                .backend()
+                .buffer()
+                .content
+                .chunks(width as usize)
+                .collect();
+            let warnings: Vec<_> = rows
+                .iter()
+                .filter(|row| row.iter().any(|cell| cell.fg == Color::LightRed))
+                .collect();
+            assert_eq!(warnings.len(), 1);
+            let warning: String = warnings[0].iter().map(|cell| cell.symbol()).collect();
+            assert!(warning.contains("Delete 1 tasks, 1 projects, 0 commits + remote settings?"));
+            assert!(warnings[0]
+                .iter()
+                .filter(|cell| cell.fg == Color::LightRed)
+                .all(|cell| cell.modifier.contains(Modifier::BOLD)));
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            let hint_row = rows
+                .iter()
+                .find(|row| {
+                    let text: String = row.iter().map(|cell| cell.symbol()).collect();
+                    text.contains("──Enter: confirm ── Esc: cancel ──")
+                })
+                .expect("confirmation hints missing");
+            assert!(hint_row.iter().any(|cell| cell.symbol() == "└"));
+            assert!(hint_row.iter().any(|cell| cell.symbol() == "┘"));
+            for cell in hint_row
+                .iter()
+                .filter(|cell| cell.symbol().chars().any(char::is_alphabetic))
+            {
+                assert_eq!(cell.fg, Color::LightYellow);
+                assert_eq!(cell.bg, Color::Reset);
+                assert!(!cell.modifier.contains(Modifier::BOLD));
+            }
+            let footer = "──Enter: confirm ── Esc: cancel ──";
+            let footer_width = footer.chars().count();
+            let footer_start = hint_row
+                .windows(footer_width)
+                .position(|cells| {
+                    cells.iter().map(|cell| cell.symbol()).collect::<String>() == footer
+                })
+                .expect("footer missing");
+            let right_corner = hint_row
+                .iter()
+                .position(|cell| cell.symbol() == "┘")
+                .unwrap();
+            assert_eq!(
+                footer_start + footer_width,
+                right_corner,
+                "footer must align right"
+            );
+            assert!(!text.contains("y/Enter") && !text.contains("n/Esc"));
+            assert!(text.contains("Backups and remote repository are kept."));
+        }
+        Ok(())
+    }
 
     #[test]
     fn empty_focused_panels_have_high_contrast_titles_and_borders() -> Result<()> {
