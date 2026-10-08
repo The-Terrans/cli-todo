@@ -223,18 +223,20 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_dialog(frame: &mut Frame, app: &App) {
-    let (title, text) = match &app.mode {
+    let (title, text): (&str, String) = match &app.mode {
         Mode::Browse => return,
         Mode::Help { .. } => return draw_keybindings(frame, app),
         Mode::Palette { .. } => return draw_palette(frame, app),
         Mode::Move { .. } => return draw_move_dialog(frame, app),
-        Mode::RemoteEdit(text) => (
-            " Todo remote (origin) ",
-            format!(
-                "{text}▏\nEnter: save · blank removes origin · Esc: cancel\n{}",
-                app.message
-            ),
-        ),
+        Mode::RemoteEdit(text) => {
+            return draw_input_dialog(
+                frame,
+                " Todo remote (blank removes origin) ",
+                text,
+                &app.message,
+                "save",
+            );
+        }
         Mode::CommitEdit(text) => {
             return draw_input_dialog(
                 frame,
@@ -670,12 +672,13 @@ mod tests {
     #[test]
     fn input_dialogs_use_relative_width_and_scroll_long_titles() -> Result<()> {
         for width in [80, 160] {
-            for kind in ["task", "project", "commit"] {
+            for kind in ["task", "project", "commit", "remote"] {
                 let mut app = App::new(db::open(Path::new(":memory:"))?)?;
                 let input = format!("{}end", "界".repeat(80));
                 app.mode = match kind {
                     "project" => Mode::ProjectEdit(None, input),
                     "commit" => Mode::CommitEdit(input),
+                    "remote" => Mode::RemoteEdit(input),
                     _ => Mode::Edit(
                         None,
                         TaskDraft {

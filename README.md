@@ -84,7 +84,7 @@ Up/Down selects a commit and immediately previews its Git details on the right: 
 
 ## Remote backup and sync
 
-Create an empty **private** GitHub repository, then press **3 → r**, enter its SSH or HTTPS URL, and press Enter. **r** also changes origin; erase the URL and save to remove it. Removing origin does not delete local checkpoints. The configured URL appears in the right preview.
+Create an empty **private** GitHub repository, then press **3 → r**, enter its SSH or HTTPS URL, and press Enter. **r** also changes origin; erase the URL and save to remove it. Removing origin does not delete local checkpoints. The configured URL appears in the right preview. The remote input uses the compact layout: 3 rows (4 with an error), 70% width with a 60-column minimum, and Enter/Esc in the bottom-right border. Long URLs scroll horizontally; the title reminds you that blank input removes origin.
 
 - **p: Push** uploads committed snapshots only, even if newer tasks are uncommitted. It never force-pushes.
 - **P: Pull** fetches remote history and applies its latest SQLite snapshot only when local todo data and Git files are clean and history can fast-forward. Local-ahead history is left alone; divergent history is refused.
