@@ -74,6 +74,8 @@ Press **Shift+D** from any browsing panel to open a confirmation showing task, p
 
 **[3] Commits** is below Projects. It tracks todo data, not the app source or current working directory. Press **c** from any browsing panel, type a message, and press **Enter**. Closing or saving the dialog preserves the previous panel focus; `c` remains ordinary input in text entry and search. Esc cancels; blank messages are rejected. A **\*** beside Commits means there are uncommitted todo changes. The marker updates after task/project changes, when opening Commits, and on restart; it disappears after a successful checkpoint. Pressing **c** without changes opens a **“No todo changes to commit”** popup. **Enter** or **Esc** closes it and preserves the previous panel focus; no checkpoint is created. An empty database with no history is considered unchanged.
 
+The commit message dialog follows the compact input layout: 3 rows (4 with an error), 70% width with a 60-column minimum, and Enter/Esc in the bottom-right border. Long messages scroll horizontally.
+
 Git must have a configured author identity (`user.name` and `user.email`). Git errors stay in the dialog so you can cancel or retry; the live database is not modified by committing.
 
 Each checkpoint uses SQLite `VACUUM INTO` to make a consistent snapshot while the app runs. Only the snapshot is committed to a dedicated repository at `$XDG_DATA_HOME/cli-todo/history/` (or `$HOME/.local/share/cli-todo/history/`). Its tracked file is `tasks.sqlite3`. All tasks and projects are included; unchanged snapshots do not create another commit. This repository is initialized on the first checkpoint or remote setup. New repositories use the main branch.

@@ -235,13 +235,15 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
                 app.message
             ),
         ),
-        Mode::CommitEdit(text) => (
-            " Commit todo snapshot ",
-            format!(
-                "{text}▏\nEnter: commit SQLite snapshot · Esc: cancel\n{}",
-                app.message
-            ),
-        ),
+        Mode::CommitEdit(text) => {
+            return draw_input_dialog(
+                frame,
+                " Commit todo snapshot ",
+                text,
+                &app.message,
+                "commit",
+            );
+        }
         Mode::ProjectEdit(id, text) => {
             return draw_input_dialog(
                 frame,
@@ -252,6 +254,7 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
                 },
                 text,
                 &app.message,
+                "save",
             );
         }
         Mode::NoChanges => return draw_no_changes_dialog(frame),
@@ -361,11 +364,11 @@ fn draw_task_editor(frame: &mut Frame, editing: bool, draft: &TaskDraft, message
     frame.render_widget(paragraph.scroll((vertical, 0)), description_inner);
 }
 
-fn draw_input_dialog(frame: &mut Frame, title: &str, text: &str, message: &str) {
+fn draw_input_dialog(frame: &mut Frame, title: &str, text: &str, message: &str, submit: &str) {
     let area = input_dialog_area(frame.area(), if message.is_empty() { 3 } else { 4 });
     let block = panel(title, true).title_bottom(
         Line::styled(
-            " Enter: save ── Esc: cancel ",
+            format!(" Enter: {submit} ── Esc: cancel "),
             Style::default()
                 .fg(Color::LightYellow)
                 .bg(Color::Reset)
@@ -665,21 +668,21 @@ mod tests {
     }
 
     #[test]
-    fn task_and_project_inputs_use_relative_width_and_scroll_long_titles() -> Result<()> {
+    fn input_dialogs_use_relative_width_and_scroll_long_titles() -> Result<()> {
         for width in [80, 160] {
-            for project in [false, true] {
+            for kind in ["task", "project", "commit"] {
                 let mut app = App::new(db::open(Path::new(":memory:"))?)?;
                 let input = format!("{}end", "界".repeat(80));
-                app.mode = if project {
-                    Mode::ProjectEdit(None, input)
-                } else {
-                    Mode::Edit(
+                app.mode = match kind {
+                    "project" => Mode::ProjectEdit(None, input),
+                    "commit" => Mode::CommitEdit(input),
+                    _ => Mode::Edit(
                         None,
                         TaskDraft {
                             title: input,
                             ..TaskDraft::default()
                         },
-                    )
+                    ),
                 };
                 let mut terminal = Terminal::new(TestBackend::new(width, 25))?;
                 for error in ["", "Title cannot be empty"] {
@@ -710,7 +713,8 @@ mod tests {
                         .iter()
                         .map(|cell| cell.symbol())
                         .collect();
-                    assert!(footer.contains("Enter: save ── Esc: cancel"));
+                    let submit = if kind == "commit" { "commit" } else { "save" };
+                    assert!(footer.contains(&format!("Enter: {submit} ── Esc: cancel")));
                     let red_rows = cells
                         .chunks(width as usize)
                         .filter(|row| row.iter().any(|cell| cell.fg == Color::LightRed))
