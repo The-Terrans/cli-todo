@@ -440,8 +440,13 @@ impl History {
             &format!("branch.{}.merge", local.trim()),
             &plan.branch,
         ])?;
-        copy_database(&source, database)?;
-        if let Err(error) = self.git_text(&["merge", "--ff-only", "--no-edit", &plan.hash]) {
+        let apply = copy_database(&source, database)
+            .and_then(|_| crate::db::migrate_description(database))
+            .and_then(|_| {
+                self.git_text(&["merge", "--ff-only", "--no-edit", &plan.hash])
+                    .map(|_| ())
+            });
+        if let Err(error) = apply {
             let original = Connection::open_with_flags(&backup, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
             if let Err(rollback) = copy_database(&original, database) {
                 return Err(format!(
@@ -533,6 +538,7 @@ mod tests {
         configure_author(&a)?;
         db::save_project(&first, None, "Work")?;
         db::create_task(&first, "first", Some(first.last_insert_rowid()))?;
+        first.execute_batch("ALTER TABLE tasks DROP COLUMN description;")?;
         a.commit(&first, "first checkpoint")?;
         a.push()?;
         b.set_remote(remote)?;
@@ -546,7 +552,14 @@ mod tests {
         assert_eq!(fs::read_dir(two.join("backups"))?.count(), 1);
         assert!(matches!(b.fetch_pull()?, SyncResult::Message(_)));
 
-        db::save_task(&first, Some(1), "second")?;
+        db::migrate_description(&first)?;
+        db::save_task_details(
+            &first,
+            Some(1),
+            "second",
+            "remote details\nsecond line",
+            None,
+        )?;
         a.commit(&first, "second checkpoint")?;
         a.push()?;
         let SyncResult::Pull(plan) = b.fetch_pull()? else {
@@ -576,7 +589,21 @@ mod tests {
         };
         b.apply_pull(&mut second, plan)?;
         assert_eq!(db::list_tasks(&second, db::Filter::All)?[0].title, "second");
+        assert_eq!(
+            db::list_tasks(&second, db::Filter::All)?[0].description,
+            "remote details\nsecond line"
+        );
         assert_eq!(b.list()?.len(), 2);
+        assert!(!b.has_changes(&second)?);
+        db::save_task_details(&second, Some(1), "second", "description-only change", None)?;
+        assert!(b.has_changes(&second)?);
+        db::save_task_details(
+            &second,
+            Some(1),
+            "second",
+            "remote details\nsecond line",
+            None,
+        )?;
         assert!(!b.has_changes(&second)?);
 
         configure_author(&b)?;

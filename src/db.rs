@@ -6,6 +6,7 @@ use std::path::Path;
 pub struct Task {
     pub id: i64,
     pub title: String,
+    pub description: String,
     pub done: bool,
     pub project_id: Option<i64>,
 }
@@ -45,9 +46,51 @@ pub fn open(path: &Path) -> Result<Connection> {
         db.execute_batch("ALTER TABLE tasks ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE;")?;
     }
     drop(columns);
+    migrate_description(&db)?;
     Ok(db)
 }
 
+fn has_description(db: &Connection) -> Result<bool> {
+    Ok(db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='description')",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+pub fn migrate_description(db: &Connection) -> Result<()> {
+    if !has_description(db)? {
+        db.execute_batch("ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT '';")?;
+    }
+    Ok(())
+}
+
+pub fn save_task_details(
+    db: &Connection,
+    id: Option<i64>,
+    title: &str,
+    description: &str,
+    project: Option<i64>,
+) -> Result<()> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Title cannot be empty".into());
+    }
+    if let Some(id) = id {
+        db.execute(
+            "UPDATE tasks SET title=?1,description=?2 WHERE id=?3",
+            params![title, description, id],
+        )?;
+    } else {
+        db.execute(
+            "INSERT INTO tasks(title,description,project_id) VALUES (?1,?2,?3)",
+            params![title, description, project],
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 pub fn save_task(db: &Connection, id: Option<i64>, title: &str) -> Result<()> {
     let title = title.trim();
     if title.is_empty() {
@@ -61,6 +104,7 @@ pub fn save_task(db: &Connection, id: Option<i64>, title: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn create_task(db: &Connection, title: &str, project: Option<i64>) -> Result<()> {
     let title = title.trim();
     if title.is_empty() {
@@ -79,13 +123,20 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
         Filter::Pending => Some(false),
         Filter::Completed => Some(true),
     };
-    let mut statement = db.prepare(
-        "SELECT id,title,done,project_id FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY id",
-    )?;
+    // Old Git snapshots predate descriptions and remain readable without migration.
+    let description = if has_description(db)? {
+        "description"
+    } else {
+        "''"
+    };
+    let mut statement = db.prepare(&format!(
+        "SELECT id,title,done,project_id,{description} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY id"
+    ))?;
     let rows = statement.query_map([done], |row| {
         Ok(Task {
             id: row.get(0)?,
             title: row.get(1)?,
+            description: row.get(4)?,
             done: row.get(2)?,
             project_id: row.get(3)?,
         })
@@ -159,6 +210,46 @@ pub fn delete_project(db: &Connection, id: i64) -> Result<()> {
 mod tests {
     use super::*;
     use std::{env, fs, time::SystemTime};
+
+    #[test]
+    fn descriptions_persist_and_legacy_tasks_get_empty_descriptions() -> Result<()> {
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_nanos();
+        let path = env::temp_dir().join(format!("cli-todo-description-{stamp}.sqlite3"));
+        let legacy = Connection::open(&path)?;
+        legacy.execute_batch("CREATE TABLE tasks(id INTEGER PRIMARY KEY,title TEXT NOT NULL,done INTEGER NOT NULL DEFAULT 0); INSERT INTO tasks(title) VALUES ('legacy');")?;
+        drop(legacy);
+        let db = open(&path)?;
+        assert_eq!(list_tasks(&db, Filter::All)?[0].description, "");
+        save_project(&db, None, "Work")?;
+        let project = db.last_insert_rowid();
+        save_task_details(
+            &db,
+            None,
+            "  titled  ",
+            "first line\n界 emoji 😀\n",
+            Some(project),
+        )?;
+        let id = db.last_insert_rowid();
+        toggle_task(&db, id)?;
+        drop(db);
+        let db = open(&path)?;
+        let tasks = list_tasks(&db, Filter::All)?;
+        assert_eq!(tasks[1].title, "titled");
+        assert_eq!(tasks[1].description, "first line\n界 emoji 😀\n");
+        assert_eq!(tasks[1].project_id, Some(project));
+        assert!(tasks[1].done);
+        assert!(save_task_details(&db, Some(id), " ", "discarded", None).is_err());
+        save_task_details(&db, Some(id), "renamed", "updated", None)?;
+        let task = list_tasks(&db, Filter::All)?.remove(1);
+        assert_eq!(task.description, "updated");
+        assert_eq!(task.project_id, Some(project));
+        assert!(task.done);
+        drop(db);
+        fs::remove_file(path)?;
+        Ok(())
+    }
 
     #[test]
     fn nuke_clears_all_data_and_rolls_back_on_failure() -> Result<()> {

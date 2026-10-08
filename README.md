@@ -36,7 +36,9 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | p / P in Commits             | Push checkpoints / safely pull and apply a snapshot       |
 | Enter in deletion dialog     | Confirm permanent deletion                               |
 | Esc in deletion dialog       | Cancel deletion                                          |
-| Enter in text entry          | Save title (empty/whitespace-only titles rejected)       |
+| Enter in text entry          | Save title; in task Description, insert newline           |
+| Tab in task editor           | Toggle Title / Description                                |
+| Ctrl+S in Description        | Save the entire task                                      |
 | Backspace in text entry      | Remove last character                                    |
 | Esc in text entry            | Discard changes                                          |
 | q while browsing             | Quit                                                     |
@@ -44,13 +46,21 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 
 All deletion confirmations use only **Enter** to confirm and **Esc** to cancel; y/n and q do nothing in these dialogs.
 
-Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Editing is intentionally append/backspace only. Task/project input dialogs use 3 rows, capped at 60 columns, with Enter/Esc in the bottom border; errors add one row. Long input scrolls horizontally to keep its end visible. Long titles remain stored but may be clipped in the task list. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
+Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Editing is intentionally append/backspace only. Project input dialogs use 3 rows and 70% of the terminal width (minimum 60 columns, reduced to fit smaller terminals), with Enter/Esc in the bottom border; errors add one row. Long title input scrolls horizontally to keep its end visible. Long titles remain stored but may be clipped in the task list. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
+
+## Task descriptions
+
+Adding or editing a task opens **Title** and **Description** sections using 70% of the terminal width, centered with a minimum width of 60 columns. On smaller terminals, they shrink to fit. Title is focused initially: **Enter** saves the whole task and **Esc** cancels. **Tab** toggles focus, with a hint on Description's top-right border.
+
+In Description, **Enter** inserts a newline and **Ctrl+S** saves the entire task. **Esc** cancels all draft changes. Only the focused field shows its save/cancel footer and cursor. Description text wraps and scrolls to keep the input end visible. Editing remains append/backspace only; descriptions are optional and preserve whitespace.
+
+Existing tasks get empty descriptions automatically. Descriptions persist across restarts and are included in Git snapshots and safe Pull. Older snapshots without descriptions remain readable and are upgraded when applied.
 
 ## Projects
 
 The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to create a project. Use arrows to select a project: its tasks preview immediately on the right. **Enter** focuses those tasks. The focused panel has a bold bright-yellow border and a black-on-yellow title, even when its list is empty. Only its row cursor is highlighted; inactive panels have dark-gray borders and no highlighted cursor. **e** renames it. Names must be nonblank and unique.
 
-New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** from Tasks returns to its navigation section. Tab remains disabled.
+New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** from Tasks returns to its navigation section. Tab remains disabled while browsing.
 
 **Deleting a project permanently deletes all its tasks**, after explicit confirmation. Esc cancels. Existing databases migrate automatically, preserving old tasks in Inbox.
 
@@ -107,6 +117,6 @@ python3 tests/smoke.py
 
 Unit tests verify Push/Pull against temporary local Git remotes, including dirty-data refusal, divergence, malformed snapshots, and rollback after an injected Git failure. These checks do not contact GitHub.
 
-The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks keybindings help, keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, SQLite checkpoints and persisted Git history, add/edit/complete/delete, confirmed nuke and cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
+The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks multiline descriptions, Tab/Ctrl+S saving, keybindings help, keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, SQLite checkpoints and persisted Git history, add/edit/complete/delete, confirmed nuke and cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
 
 Verified in this workspace: Nix shell (Cargo 1.98.0, Rust 1.98.1, SQLite 3.53.3), formatting, unit test, Clippy, build, and PTY smoke test passed.

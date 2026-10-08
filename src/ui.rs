@@ -1,10 +1,11 @@
-use crate::app::{App, Mode, FILTERS, KEYBINDINGS};
+use crate::app::{App, Mode, TaskDraft, FILTERS, KEYBINDINGS};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{
         Block, BorderType, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph,
+        Wrap,
     },
     Frame,
 };
@@ -260,18 +261,7 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
             "All tasks in this project will be permanently deleted.\nEnter: confirm · Esc: cancel"
                 .into(),
         ),
-        Mode::Edit(id, text) => {
-            return draw_input_dialog(
-                frame,
-                if id.is_some() {
-                    " Edit task "
-                } else {
-                    " Add task "
-                },
-                text,
-                &app.message,
-            );
-        }
+        Mode::Edit(id, draft) => return draw_task_editor(frame, id.is_some(), draft, &app.message),
         Mode::Delete(_) => (
             " Delete task? ",
             "Permanently delete selected task?\nEnter: confirm · Esc: cancel".into(),
@@ -282,11 +272,97 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(text).block(panel(title, true)), area);
 }
 
+fn draw_task_editor(frame: &mut Frame, editing: bool, draft: &TaskDraft, message: &str) {
+    let area = input_dialog_area(frame.area(), if message.is_empty() { 11 } else { 12 });
+    let rows = Layout::vertical([
+        Constraint::Length(if message.is_empty() { 3 } else { 4 }),
+        Constraint::Min(3),
+    ])
+    .split(area);
+    let hint = Style::default()
+        .fg(Color::LightYellow)
+        .bg(Color::Reset)
+        .remove_modifier(Modifier::BOLD);
+    let mut title = panel(
+        if editing {
+            " Edit task: Title "
+        } else {
+            " Add task: Title "
+        },
+        !draft.description_focused,
+    );
+    if !draft.description_focused {
+        title = title.title_bottom(
+            Line::styled(" Enter: save ── Esc: cancel ", hint).alignment(Alignment::Right),
+        );
+    }
+    let title_inner = title.inner(rows[0]);
+    let title_text = Line::raw(if draft.description_focused {
+        draft.title.clone()
+    } else {
+        format!("{}▏", draft.title)
+    });
+    let horizontal = title_text
+        .width()
+        .saturating_sub(title_inner.width as usize)
+        .min(u16::MAX as usize) as u16;
+    let mut description = panel(" Description ", draft.description_focused).title(
+        Line::styled(
+            " Press <tab> to toggle focus ",
+            hint.fg(if draft.description_focused {
+                Color::LightYellow
+            } else {
+                Color::Gray
+            }),
+        )
+        .alignment(Alignment::Right),
+    );
+    if draft.description_focused {
+        description = description.title_bottom(
+            Line::styled(" <c-s>: save ── Esc: cancel ", hint).alignment(Alignment::Right),
+        );
+    }
+    let description_inner = description.inner(rows[1]);
+    let text = if draft.description_focused {
+        format!("{}▏", draft.description)
+    } else {
+        draft.description.clone()
+    };
+    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+    let vertical = if draft.description_focused {
+        paragraph
+            .line_count(description_inner.width)
+            .saturating_sub(description_inner.height as usize)
+            .min(u16::MAX as usize) as u16
+    } else {
+        0
+    };
+    frame.render_widget(Clear, area);
+    frame.render_widget(title, rows[0]);
+    frame.render_widget(
+        Paragraph::new(title_text).scroll((0, horizontal)),
+        Rect {
+            height: title_inner.height.min(1),
+            ..title_inner
+        },
+    );
+    if !message.is_empty() && title_inner.height > 1 {
+        frame.render_widget(
+            Paragraph::new(message.lines().next().unwrap_or(""))
+                .style(Style::default().fg(Color::LightRed)),
+            Rect {
+                y: title_inner.y + 1,
+                height: 1,
+                ..title_inner
+            },
+        );
+    }
+    frame.render_widget(description, rows[1]);
+    frame.render_widget(paragraph.scroll((vertical, 0)), description_inner);
+}
+
 fn draw_input_dialog(frame: &mut Frame, title: &str, text: &str, message: &str) {
-    let mut area = dialog_area(frame.area(), if message.is_empty() { 3 } else { 4 });
-    let width = area.width.min(60);
-    area.x += (area.width - width) / 2;
-    area.width = width;
+    let area = input_dialog_area(frame.area(), if message.is_empty() { 3 } else { 4 });
     let block = panel(title, true).title_bottom(
         Line::styled(
             " Enter: save ── Esc: cancel ",
@@ -484,6 +560,15 @@ fn draw_palette(frame: &mut Frame, app: &App) {
     );
 }
 
+fn input_dialog_area(area: Rect, height: u16) -> Rect {
+    let mut dialog = dialog_area(area, height);
+    dialog.width = ((u32::from(area.width) * 70 / 100) as u16)
+        .max(60)
+        .min(area.width.saturating_sub(2));
+    dialog.x = area.x + (area.width - dialog.width) / 2;
+    dialog
+}
+
 fn dialog_area(area: Rect, height: u16) -> Rect {
     let rows = Layout::vertical([
         Constraint::Percentage(30),
@@ -508,7 +593,79 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn task_and_project_inputs_are_compact_and_scroll_long_titles() -> Result<()> {
+    fn input_width_has_a_minimum_but_never_overflows_small_terminals() {
+        for width in [1, 30, 59, 60, 61, 62, 80, 100, 160] {
+            let area = Rect::new(7, 3, width, 25);
+            let dialog = input_dialog_area(area, 3);
+            assert_eq!(
+                dialog.width,
+                (width * 70 / 100).max(60).min(width.saturating_sub(2))
+            );
+            assert_eq!(dialog.x, area.x + (width - dialog.width) / 2);
+            assert!(dialog.right() <= area.right());
+            if width >= 62 {
+                assert!(dialog.width >= 60);
+            }
+        }
+    }
+
+    #[test]
+    fn task_editor_shows_only_the_focused_fields_footer_and_cursor() -> Result<()> {
+        let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+        app.mode = Mode::Edit(
+            None,
+            TaskDraft {
+                title: "task".into(),
+                description: format!("{}\nLAST", "界 words 😀 ".repeat(100)),
+                description_focused: false,
+            },
+        );
+        for focused in [false, true] {
+            let Mode::Edit(_, draft) = &mut app.mode else {
+                unreachable!();
+            };
+            draft.description_focused = focused;
+            let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
+            terminal.draw(|frame| draw(frame, &app))?;
+            let cells = &terminal.backend().buffer().content;
+            let text: String = cells.iter().map(|cell| cell.symbol()).collect();
+            assert!(text.contains("Description"));
+            assert!(text.contains("Press <tab> to toggle focus"));
+            assert_eq!(text.contains("Enter: save"), !focused);
+            assert_eq!(text.contains("<c-s>: save"), focused);
+            assert_eq!(text.matches("Esc: cancel").count(), 1);
+            assert_eq!(
+                cells
+                    .iter()
+                    .filter(|cell| cell.symbol().contains('▏'))
+                    .count(),
+                1
+            );
+            assert!(text.contains(if focused { "LAST▏" } else { "task▏" }));
+            let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
+            assert_eq!(corners.len(), 2);
+            assert_eq!(
+                corners[0].fg,
+                if focused {
+                    Color::DarkGray
+                } else {
+                    Color::LightYellow
+                }
+            );
+            assert_eq!(
+                corners[1].fg,
+                if focused {
+                    Color::LightYellow
+                } else {
+                    Color::DarkGray
+                }
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn task_and_project_inputs_use_relative_width_and_scroll_long_titles() -> Result<()> {
         for width in [80, 160] {
             for project in [false, true] {
                 let mut app = App::new(db::open(Path::new(":memory:"))?)?;
@@ -516,7 +673,13 @@ mod tests {
                 app.mode = if project {
                     Mode::ProjectEdit(None, input)
                 } else {
-                    Mode::Edit(None, input)
+                    Mode::Edit(
+                        None,
+                        TaskDraft {
+                            title: input,
+                            ..TaskDraft::default()
+                        },
+                    )
                 };
                 let mut terminal = Terminal::new(TestBackend::new(width, 25))?;
                 for error in ["", "Title cannot be empty"] {
@@ -526,8 +689,12 @@ mod tests {
                     let top_left = cells.iter().position(|cell| cell.symbol() == "┌").unwrap();
                     let top_right = cells.iter().position(|cell| cell.symbol() == "┐").unwrap();
                     let bottom_left = cells.iter().position(|cell| cell.symbol() == "└").unwrap();
-                    assert_eq!(top_right - top_left + 1, 60);
-                    assert_eq!(top_left % width as usize, (width as usize - 60) / 2);
+                    let relative_width = (width as usize * 70 / 100).max(60);
+                    assert_eq!(top_right - top_left + 1, relative_width);
+                    assert_eq!(
+                        top_left % width as usize,
+                        (width as usize - relative_width) / 2
+                    );
                     assert_eq!(
                         (bottom_left - top_left) / width as usize + 1,
                         if error.is_empty() { 3 } else { 4 }

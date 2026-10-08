@@ -20,6 +20,10 @@ with tempfile.TemporaryDirectory() as data:
         with sqlite3.connect(dbpath) as db:
             return db.execute("SELECT title,done FROM tasks ORDER BY id").fetchall()
 
+    def descriptions():
+        with sqlite3.connect(dbpath) as db:
+            return db.execute("SELECT description FROM tasks ORDER BY id").fetchall()
+
     def launch():
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
@@ -69,8 +73,9 @@ with tempfile.TemporaryDirectory() as data:
         assert rows() == [("first", 0)]
         send(b"aabandoned\x1b")
         assert len(rows()) == 1
-        send(b"\r\r!\r")
+        send(b"\r\r!\tdescription first\rsecond line\x13")
         assert rows() == [("first!", 0)]
+        assert descriptions() == [("description first\nsecond line",)]
         send(b" ")
         assert rows() == [("first!", 1)]
         send(b"\x1b")
@@ -85,6 +90,7 @@ with tempfile.TemporaryDirectory() as data:
         finish(0)
         proc, master, slave, before = launch()
         assert b"first!" in screen()
+        assert descriptions() == [("description first\nsecond line",)]
         send(b"\rd\r")
         assert rows() == []
         assert b"Commands" in send(b"\x0b")
@@ -119,6 +125,8 @@ with tempfile.TemporaryDirectory() as data:
         send(b"d\r")
         assert rows() == []
         send(b"1apreserved\r")
+        send(b"\re\tbackup description\x13")
+        assert descriptions() == [("backup description",)]
         assert b"No todo commits" in send(b"3")
         assert b"Commit message cannot be empty" in send(b"c\r")
         send(b"\x1b")
@@ -138,6 +146,7 @@ with tempfile.TemporaryDirectory() as data:
         history = dbpath.parent / "history"
         with sqlite3.connect(history / "tasks.sqlite3") as snapshot:
             assert snapshot.execute("SELECT title,done FROM tasks").fetchall() == [("preserved", 0)]
+            assert snapshot.execute("SELECT description FROM tasks").fetchone()[0] == "backup description"
         send(b"\r")
         send(b"\x1b")
         send(b"1\r ")
@@ -197,7 +206,7 @@ with tempfile.TemporaryDirectory() as data:
         assert b"smoke forced error" in output
         finish(1)
         assert rows() == [("preserved", 0)]
-        print("PASS: PTY keybindings help, navigation, palette, projects, checkpoints, sync, nuke, persistence, terminal restoration")
+        print("PASS: PTY descriptions/Tab/Ctrl+S, help, navigation, palette, projects, checkpoints, sync, nuke, persistence, terminal restoration")
     finally:
         if proc.poll() is None:
             proc.kill()

@@ -43,7 +43,10 @@ pub const KEYBINDINGS: &[&str] = &[
     "TEXT ENTRY, SEARCH AND MOVE",
     "  Typing        Append text/search, including ? and shortcut letters",
     "  Backspace     Remove last character",
-    "  Enter         Save text; run search result; choose move destination",
+    "  Enter         Save title/text; run search result; choose destination",
+    "  Enter         Insert newline when task Description is focused",
+    "  Tab           Toggle task Title/Description",
+    "  Ctrl+S        Save task from Description",
     "  Up / Down     Choose search result or move destination",
     "  Esc           Cancel dialog/search/move",
     "  Ctrl+K        Close palette; does not interrupt other dialogs",
@@ -59,7 +62,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  PageUp/Down   Scroll one page",
     "  Home / End    Jump to first/last page",
     "  ? / Esc       Close help; return to the previous focus",
-    "  Tab           Disabled",
+    "  Tab           Disabled while browsing",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,12 +89,19 @@ const ACTIONS: [(&str, Action); 9] = [
     ("Quit", Action::Quit),
 ];
 
+#[derive(Default)]
+pub struct TaskDraft {
+    pub title: String,
+    pub description: String,
+    pub description_focused: bool,
+}
+
 pub enum Mode {
     Browse,
     Help {
         scroll: u16,
     },
-    Edit(Option<i64>, String),
+    Edit(Option<i64>, TaskDraft),
     Delete(i64),
     Nuke {
         tasks: usize,
@@ -225,6 +235,18 @@ impl App {
         let modifiers = key.modifiers.difference(KeyModifiers::SHIFT);
         if modifiers == KeyModifiers::CONTROL && matches!(key.code, KeyCode::Char('k' | 'K')) {
             self.toggle_palette()?;
+            return Ok(false);
+        }
+        if modifiers == KeyModifiers::CONTROL && matches!(key.code, KeyCode::Char('s' | 'S')) {
+            if matches!(&self.mode, Mode::Edit(_, draft) if draft.description_focused) {
+                let changes = self.db.total_changes();
+                self.message.clear();
+                let result = self.save_edit();
+                if self.db.total_changes() != changes {
+                    self.update_commit_status();
+                }
+                result?;
+            }
             return Ok(false);
         }
         if !modifiers.is_empty() {
@@ -724,11 +746,18 @@ impl App {
                 if self.commits_focused {
                     self.focus_inbox()?;
                 }
-                self.mode = Mode::Edit(None, String::new());
+                self.mode = Mode::Edit(None, TaskDraft::default());
             }
             Action::Edit => {
                 if let Some(task) = self.tasks.get(self.selected_task) {
-                    self.mode = Mode::Edit(Some(task.id), task.title.clone());
+                    self.mode = Mode::Edit(
+                        Some(task.id),
+                        TaskDraft {
+                            title: task.title.clone(),
+                            description: task.description.clone(),
+                            description_focused: false,
+                        },
+                    );
                 }
             }
             Action::Delete => {
@@ -869,15 +898,24 @@ impl App {
     }
 
     fn handle_edit_key(&mut self, key: KeyCode) -> Result<()> {
-        let Mode::Edit(_, text) = &mut self.mode else {
+        let Mode::Edit(_, draft) = &mut self.mode else {
             return Ok(());
+        };
+        let text = if draft.description_focused {
+            &mut draft.description
+        } else {
+            &mut draft.title
         };
         match key {
             KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Tab | KeyCode::BackTab => {
+                draft.description_focused = !draft.description_focused
+            }
             KeyCode::Backspace => {
                 text.pop();
             }
             KeyCode::Char(character) => text.push(character),
+            KeyCode::Enter if draft.description_focused => text.push('\n'),
             KeyCode::Enter => self.save_edit()?,
             _ => {}
         }
@@ -885,18 +923,21 @@ impl App {
     }
 
     fn save_edit(&mut self) -> Result<()> {
-        let Mode::Edit(id, text) = &self.mode else {
+        let Mode::Edit(id, draft) = &mut self.mode else {
             return Ok(());
         };
-        if text.trim().is_empty() {
+        if draft.title.trim().is_empty() {
+            draft.description_focused = false;
             self.message = "Title cannot be empty".into();
             return Ok(());
         }
-        if id.is_some() {
-            db::save_task(&self.db, *id, text)?;
-        } else {
-            db::create_task(&self.db, text, self.current_project)?;
-        }
+        db::save_task_details(
+            &self.db,
+            *id,
+            &draft.title,
+            &draft.description,
+            self.current_project,
+        )?;
         self.mode = Mode::Browse;
         self.refresh_tasks()
     }
@@ -1157,7 +1198,7 @@ mod tests {
         app.handle_key(KeyCode::Char('1'))?;
         app.handle_key(KeyCode::Char('a'))?;
         app.handle_key_event(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT))?;
-        assert!(matches!(&app.mode, Mode::Edit(None, text) if text == "D"));
+        assert!(matches!(&app.mode, Mode::Edit(None, text) if text.title == "D"));
         app.handle_key(KeyCode::Esc)?;
         app.handle_key(KeyCode::Char('2'))?;
         app.handle_key(KeyCode::Enter)?;
@@ -1420,6 +1461,66 @@ mod tests {
     }
 
     #[test]
+    fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
+        let mut app = app()?;
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Char('t'))?;
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
+        assert!(matches!(app.mode, Mode::Edit(..)));
+        assert!(db::list_tasks(&app.db, Filter::All)?.is_empty());
+        app.handle_key(KeyCode::Tab)?;
+        app.handle_key(KeyCode::Char('界'))?;
+        app.handle_key(KeyCode::Enter)?;
+        app.handle_key(KeyCode::Char('?'))?;
+        app.handle_key(KeyCode::Backspace)?;
+        app.handle_key(KeyCode::Char('c'))?;
+        assert!(
+            matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "t" && draft.description == "界\nc" && draft.description_focused)
+        );
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))?;
+        assert!(matches!(app.mode, Mode::Edit(..)));
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
+        assert!(matches!(app.mode, Mode::Browse));
+        assert_eq!(app.tasks[0].description, "界\nc");
+        app.handle_key(KeyCode::Enter)?;
+        app.handle_key(KeyCode::Char('e'))?;
+        assert!(
+            matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "t" && draft.description == "界\nc" && !draft.description_focused)
+        );
+        app.handle_key(KeyCode::Tab)?;
+        app.handle_key(KeyCode::Char('!'))?;
+        app.handle_key(KeyCode::Esc)?;
+        assert_eq!(app.tasks[0].description, "界\nc");
+        app.handle_key(KeyCode::Char('e'))?;
+        app.handle_key(KeyCode::Tab)?;
+        app.handle_key(KeyCode::Char('!'))?;
+        app.handle_key(KeyCode::Tab)?;
+        app.handle_key(KeyCode::Enter)?;
+        assert_eq!(app.tasks[0].description, "界\nc!");
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Tab)?;
+        app.handle_key(KeyCode::Char('x'))?;
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
+        assert_eq!(app.message, "Title cannot be empty");
+        assert!(
+            matches!(&app.mode, Mode::Edit(_, draft) if !draft.description_focused && draft.description == "x")
+        );
+        app.handle_key(KeyCode::Char('n'))?;
+        app.handle_key(KeyCode::Enter)?;
+        assert_eq!(db::list_tasks(&app.db, Filter::All)?[1].description, "x");
+        for description in [false, true] {
+            app.handle_key(KeyCode::Char('a'))?;
+            if description {
+                app.handle_key(KeyCode::Tab)?;
+            }
+            app.handle_key(KeyCode::Char('z'))?;
+            app.handle_key(KeyCode::Esc)?;
+            assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 2);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn commit_shortcut_works_in_every_panel_and_preserves_focus() -> Result<()> {
         let mut app = app()?;
         db::save_project(&app.db, None, "Work")?;
@@ -1464,7 +1565,7 @@ mod tests {
         app.handle_key(KeyCode::Char('1'))?;
         app.handle_key(KeyCode::Char('a'))?;
         app.handle_key(KeyCode::Char('c'))?;
-        assert!(matches!(&app.mode, Mode::Edit(None, text) if text == "c"));
+        assert!(matches!(&app.mode, Mode::Edit(None, text) if text.title == "c"));
         app.handle_key(KeyCode::Esc)?;
         assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 2);
         Ok(())
@@ -1604,7 +1705,7 @@ mod tests {
         app.handle_key(KeyCode::Char('a'))?;
         app.handle_key(KeyCode::Char('0'))?;
         app.handle_key(KeyCode::Char('1'))?;
-        assert!(matches!(&app.mode, Mode::Edit(None, text) if text == "01"));
+        assert!(matches!(&app.mode, Mode::Edit(None, text) if text.title == "01"));
         assert!(app.navigation_focused);
         app.handle_key(KeyCode::Esc)?;
         search_actions(&mut app, "01")?;
@@ -1744,7 +1845,7 @@ mod tests {
         app.handle_key(KeyCode::Char('a'))?;
         app.handle_key(KeyCode::Char('x'))?;
         app.handle_key_event(ctrl_k)?;
-        assert!(matches!(&app.mode, Mode::Edit(None, text) if text == "x"));
+        assert!(matches!(&app.mode, Mode::Edit(None, text) if text.title == "x"));
         app.handle_key(KeyCode::Esc)?;
         assert!(app.tasks.is_empty());
         Ok(())
