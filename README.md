@@ -31,7 +31,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | d                            | Request task/project deletion in its section              |
 | Shift+D while browsing       | Confirm deletion of tasks, projects, local history and remote settings |
 | m in Tasks                   | Move task to Inbox or a project; arrows and Enter choose  |
-| c in Commits                 | Enter a message and commit a safe todo SQLite snapshot    |
+| c while browsing             | Commit a safe todo SQLite snapshot from any panel         |
 | r in Commits                 | Set/change origin URL; empty input removes it             |
 | p / P in Commits             | Push checkpoints / safely pull and apply a snapshot       |
 | Enter in deletion dialog     | Confirm permanent deletion                               |
@@ -62,7 +62,7 @@ Press **Shift+D** from any browsing panel to open a confirmation showing task, p
 
 ## Todo commits
 
-**[3] Commits** is below Projects. It tracks todo data, not the app source or current working directory. Press **3**, then **c**, type a message, and press **Enter**. Esc cancels; blank messages are rejected. A **\*** beside Commits means there are uncommitted todo changes. The marker updates after task/project changes, when opening Commits, and on restart; it disappears after a successful checkpoint. Pressing **c** without changes shows **“No todo changes to commit”** instead of opening a message dialog. An empty database with no history is considered unchanged.
+**[3] Commits** is below Projects. It tracks todo data, not the app source or current working directory. Press **c** from any browsing panel, type a message, and press **Enter**. Closing or saving the dialog preserves the previous panel focus; `c` remains ordinary input in text entry and search. Esc cancels; blank messages are rejected. A **\*** beside Commits means there are uncommitted todo changes. The marker updates after task/project changes, when opening Commits, and on restart; it disappears after a successful checkpoint. Pressing **c** without changes opens a **“No todo changes to commit”** popup. **Enter** or **Esc** closes it and preserves the previous panel focus; no checkpoint is created. An empty database with no history is considered unchanged.
 
 Git must have a configured author identity (`user.name` and `user.email`). Git errors stay in the dialog so you can cancel or retry; the live database is not modified by committing.
 

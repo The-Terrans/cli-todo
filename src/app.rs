@@ -24,6 +24,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Enter         Open preview; edit a task in Tasks",
     "  Esc           Return to sidebar; no effect when already there",
     "  Ctrl+K        Search tasks and actions",
+    "  c             Create a SQLite checkpoint from any panel",
     "  q             Quit; wait for sync to finish first",
     "",
     "TASKS AND PROJECTS",
@@ -35,7 +36,6 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Shift+D       Nuke all data, local commits and remote settings",
     "",
     "COMMITS (LEFT PANEL)",
-    "  c             Create a SQLite checkpoint",
     "  r             Set/change/remove origin",
     "  p             Push committed snapshots",
     "  Shift+P       Safely pull and apply the latest snapshot",
@@ -48,6 +48,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Esc           Cancel dialog/search/move",
     "  Ctrl+K        Close palette; does not interrupt other dialogs",
     "  Empty origin  Save empty input to remove remote settings",
+    "  Enter / Esc   Close the no-changes commit popup",
     "",
     "CONFIRMATIONS",
     "  Enter         Confirm task/project deletion or nuke",
@@ -104,6 +105,7 @@ pub enum Mode {
     ProjectEdit(Option<i64>, String),
     ProjectDelete(i64),
     CommitEdit(String),
+    NoChanges,
     RemoteEdit(String),
     Move {
         task: i64,
@@ -262,6 +264,11 @@ impl App {
             Mode::ProjectEdit(..) => self.handle_project_edit_key(key)?,
             Mode::ProjectDelete(id) => self.handle_project_delete_key(key, id)?,
             Mode::CommitEdit(_) => self.handle_commit_edit_key(key)?,
+            Mode::NoChanges => {
+                if matches!(key, KeyCode::Enter | KeyCode::Esc) {
+                    self.mode = Mode::Browse;
+                }
+            }
             Mode::RemoteEdit(_) => self.handle_remote_edit_key(key),
             Mode::Move { .. } => self.handle_move_key(key)?,
         }
@@ -271,6 +278,7 @@ impl App {
     fn handle_browse_key(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Char('?') => self.mode = Mode::Help { scroll: 0 },
+            KeyCode::Char('c') => self.begin_commit(),
             KeyCode::Char('D') => self.begin_nuke()?,
             KeyCode::Char('0') => self.navigation_focused = false,
             KeyCode::Char('1') => self.focus_inbox()?,
@@ -408,7 +416,7 @@ impl App {
         if self.uncommitted_changes {
             self.mode = Mode::CommitEdit(String::new());
         } else {
-            self.message = "No todo changes to commit".into();
+            self.mode = Mode::NoChanges;
         }
     }
 
@@ -440,7 +448,7 @@ impl App {
             (Some(history), Some(commit)) => history
                 .details(&commit.hash)
                 .unwrap_or_else(|error| format!("Could not read commit: {error}")),
-            _ => "No todo commits yet. Press c in [3] Commits to create a SQLite snapshot.".into(),
+            _ => "No todo commits yet. Press c to create a SQLite snapshot.".into(),
         };
     }
 
@@ -462,7 +470,6 @@ impl App {
             return;
         }
         match key {
-            KeyCode::Char('c') => self.begin_commit(),
             KeyCode::Char('r') => self.begin_remote_edit(),
             KeyCode::Char('p') => self.start_sync(false),
             KeyCode::Char('P') => self.start_sync(true),
@@ -1305,8 +1312,16 @@ mod tests {
         assert!(!app.uncommitted_changes);
         app.handle_key(KeyCode::Char('3'))?;
         app.handle_key(KeyCode::Char('c'))?;
+        assert!(matches!(app.mode, Mode::NoChanges));
+        assert!(app.message.is_empty());
+        assert!(!root.join("history").exists());
+        for ignored in ['q', 'c', 'y', 'n', '1'] {
+            assert!(!app.handle_key(KeyCode::Char(ignored))?);
+            assert!(matches!(app.mode, Mode::NoChanges));
+        }
+        app.handle_key(KeyCode::Esc)?;
         assert!(matches!(app.mode, Mode::Browse));
-        assert_eq!(app.message, "No todo changes to commit");
+        assert!(app.navigation_focused && app.commits_focused);
         app.handle_key(KeyCode::Char('1'))?;
         app.handle_key(KeyCode::Char('a'))?;
         app.handle_key(KeyCode::Char('x'))?;
@@ -1335,8 +1350,11 @@ mod tests {
         assert!(matches!(app.mode, Mode::Browse), "{}", app.message);
         assert!(!app.uncommitted_changes);
         app.handle_key(KeyCode::Char('c'))?;
-        assert_eq!(app.message, "No todo changes to commit");
+        assert!(matches!(app.mode, Mode::NoChanges));
         assert_eq!(app.commits.len(), 1);
+        app.handle_key(KeyCode::Enter)?;
+        assert!(matches!(app.mode, Mode::Browse));
+        assert!(app.navigation_focused && app.commits_focused);
         drop(app);
         let mut app = App::new(db::open(&path)?)?;
         assert!(!app.uncommitted_changes);
@@ -1398,6 +1416,57 @@ mod tests {
         assert!(!app.uncommitted_changes);
         drop(app);
         fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn commit_shortcut_works_in_every_panel_and_preserves_focus() -> Result<()> {
+        let mut app = app()?;
+        db::save_project(&app.db, None, "Work")?;
+        db::create_task(&app.db, "project task", Some(app.db.last_insert_rowid()))?;
+        db::save_task(&app.db, None, "inbox task")?;
+        app.refresh_projects()?;
+        for section in ['1', '2', '3'] {
+            for preview in [false, true] {
+                app.handle_key(KeyCode::Char(section))?;
+                if preview {
+                    app.handle_key(KeyCode::Char('0'))?;
+                }
+                let focus = (
+                    app.navigation_focused,
+                    app.projects_focused,
+                    app.commits_focused,
+                    app.current_project,
+                    app.selected_task,
+                    app.selected_project,
+                    app.selected_filter,
+                );
+                app.handle_key(KeyCode::Char('c'))?;
+                assert!(matches!(&app.mode, Mode::CommitEdit(text) if text.is_empty()));
+                app.handle_key(KeyCode::Char('c'))?;
+                assert!(matches!(&app.mode, Mode::CommitEdit(text) if text == "c"));
+                app.handle_key(KeyCode::Esc)?;
+                assert!(matches!(app.mode, Mode::Browse));
+                assert_eq!(
+                    focus,
+                    (
+                        app.navigation_focused,
+                        app.projects_focused,
+                        app.commits_focused,
+                        app.current_project,
+                        app.selected_task,
+                        app.selected_project,
+                        app.selected_filter
+                    )
+                );
+            }
+        }
+        app.handle_key(KeyCode::Char('1'))?;
+        app.handle_key(KeyCode::Char('a'))?;
+        app.handle_key(KeyCode::Char('c'))?;
+        assert!(matches!(&app.mode, Mode::Edit(None, text) if text == "c"));
+        app.handle_key(KeyCode::Esc)?;
+        assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 2);
         Ok(())
     }
 

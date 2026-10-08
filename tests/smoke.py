@@ -122,14 +122,18 @@ with tempfile.TemporaryDirectory() as data:
         assert b"No todo commits" in send(b"3")
         assert b"Commit message cannot be empty" in send(b"c\r")
         send(b"\x1b")
+        send(b"1")
         committed = send(b"cfirst checkpoint\r")
         deadline = time.monotonic() + 10
         while b"snapshot committed" not in committed:
             assert time.monotonic() < deadline, f"checkpoint did not finish: {committed!r}"
             committed += b" " + screen()
-        assert b"Author:" in committed
+        assert b"Author:" in send(b"3")
+        send(b"1")
         notification = send(b"c")
         assert b"changes to commit" in notification, notification
+        send(b"q")
+        assert proc.poll() is None, "no-changes popup should only close with Enter/Esc"
         assert subprocess.check_output(["git", "-C", str(dbpath.parent / "history"), "rev-list", "--count", "HEAD"]).strip() == b"1"
         history = dbpath.parent / "history"
         with sqlite3.connect(history / "tasks.sqlite3") as snapshot:

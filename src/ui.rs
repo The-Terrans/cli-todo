@@ -141,7 +141,7 @@ fn draw_commits(frame: &mut Frame, area: Rect, app: &App) {
     );
     if app.commits.is_empty() {
         frame.render_widget(
-            Paragraph::new("3 → c: checkpoint"),
+            Paragraph::new("c: checkpoint"),
             area.inner(Margin::new(1, 1)),
         );
     }
@@ -249,6 +249,7 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
             },
             format!("{text}▏\nEnter: save · Esc: cancel\n{}", app.message),
         ),
+        Mode::NoChanges => return draw_no_changes_dialog(frame),
         Mode::Nuke { .. } => return draw_nuke_dialog(frame, app),
         Mode::ProjectDelete(_) => (
             " Delete project AND its tasks? ",
@@ -271,6 +272,25 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
     let area = dialog_area(frame.area(), 6);
     frame.render_widget(Clear, area);
     frame.render_widget(Paragraph::new(text).block(panel(title, true)), area);
+}
+
+fn draw_no_changes_dialog(frame: &mut Frame) {
+    let area = dialog_area(frame.area(), 3);
+    let block = panel(" Commit ", true).title_bottom(
+        Line::styled(
+            " Enter/Esc: close ",
+            Style::default()
+                .fg(Color::LightYellow)
+                .bg(Color::Reset)
+                .remove_modifier(Modifier::BOLD),
+        )
+        .alignment(Alignment::Right),
+    );
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new("No todo changes to commit.").block(block),
+        area,
+    );
 }
 
 fn draw_keybindings(frame: &mut Frame, app: &App) {
@@ -435,6 +455,39 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{backend::TestBackend, Terminal};
     use std::path::Path;
+
+    #[test]
+    fn no_changes_notification_is_a_popup_not_a_footer_message() -> Result<()> {
+        let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+        app.mode = Mode::NoChanges;
+        let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
+        terminal.draw(|frame| draw(frame, &app))?;
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("No todo changes to commit."));
+        assert!(text.contains("Enter/Esc: close"));
+        let footer: String = terminal.backend().buffer().content[1920..2000]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert_eq!(footer.trim(), "?: keybindings");
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))?;
+        terminal.draw(|frame| draw(frame, &app))?;
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(!text.contains("No todo changes to commit."));
+        Ok(())
+    }
 
     #[test]
     fn footer_is_compact_and_help_is_readable_in_a_short_terminal() -> Result<()> {
