@@ -44,7 +44,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 
 All deletion confirmations use only **Enter** to confirm and **Esc** to cancel; y/n and q do nothing in these dialogs.
 
-Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Editing is intentionally append/backspace only. Long titles remain stored but may be clipped by terminal width. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
+Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Editing is intentionally append/backspace only. Task/project input dialogs use 3 rows, capped at 60 columns, with Enter/Esc in the bottom border; errors add one row. Long input scrolls horizontally to keep its end visible. Long titles remain stored but may be clipped in the task list. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
 
 ## Projects
 

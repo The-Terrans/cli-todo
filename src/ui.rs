@@ -241,14 +241,18 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
                 app.message
             ),
         ),
-        Mode::ProjectEdit(id, text) => (
-            if id.is_some() {
-                " Rename project "
-            } else {
-                " Add project "
-            },
-            format!("{text}▏\nEnter: save · Esc: cancel\n{}", app.message),
-        ),
+        Mode::ProjectEdit(id, text) => {
+            return draw_input_dialog(
+                frame,
+                if id.is_some() {
+                    " Rename project "
+                } else {
+                    " Add project "
+                },
+                text,
+                &app.message,
+            );
+        }
         Mode::NoChanges => return draw_no_changes_dialog(frame),
         Mode::Nuke { .. } => return draw_nuke_dialog(frame, app),
         Mode::ProjectDelete(_) => (
@@ -256,14 +260,18 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
             "All tasks in this project will be permanently deleted.\nEnter: confirm · Esc: cancel"
                 .into(),
         ),
-        Mode::Edit(id, text) => (
-            if id.is_some() {
-                " Edit task "
-            } else {
-                " Add task "
-            },
-            format!("{text}▏\nEnter: save · Esc: cancel\n{}", app.message),
-        ),
+        Mode::Edit(id, text) => {
+            return draw_input_dialog(
+                frame,
+                if id.is_some() {
+                    " Edit task "
+                } else {
+                    " Add task "
+                },
+                text,
+                &app.message,
+            );
+        }
         Mode::Delete(_) => (
             " Delete task? ",
             "Permanently delete selected task?\nEnter: confirm · Esc: cancel".into(),
@@ -272,6 +280,49 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
     let area = dialog_area(frame.area(), 6);
     frame.render_widget(Clear, area);
     frame.render_widget(Paragraph::new(text).block(panel(title, true)), area);
+}
+
+fn draw_input_dialog(frame: &mut Frame, title: &str, text: &str, message: &str) {
+    let mut area = dialog_area(frame.area(), if message.is_empty() { 3 } else { 4 });
+    let width = area.width.min(60);
+    area.x += (area.width - width) / 2;
+    area.width = width;
+    let block = panel(title, true).title_bottom(
+        Line::styled(
+            " Enter: save ── Esc: cancel ",
+            Style::default()
+                .fg(Color::LightYellow)
+                .bg(Color::Reset)
+                .remove_modifier(Modifier::BOLD),
+        )
+        .alignment(Alignment::Right),
+    );
+    let inner = block.inner(area);
+    let input = Line::raw(format!("{text}▏"));
+    let scroll = input
+        .width()
+        .saturating_sub(inner.width as usize)
+        .min(u16::MAX as usize) as u16;
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(input).scroll((0, scroll)),
+        Rect {
+            height: inner.height.min(1),
+            ..inner
+        },
+    );
+    if !message.is_empty() && inner.height > 1 {
+        frame.render_widget(
+            Paragraph::new(message.lines().next().unwrap_or(""))
+                .style(Style::default().fg(Color::LightRed)),
+            Rect {
+                y: inner.y + 1,
+                height: 1,
+                ..inner
+            },
+        );
+    }
 }
 
 fn draw_no_changes_dialog(frame: &mut Frame) {
@@ -455,6 +506,57 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{backend::TestBackend, Terminal};
     use std::path::Path;
+
+    #[test]
+    fn task_and_project_inputs_are_compact_and_scroll_long_titles() -> Result<()> {
+        for width in [80, 160] {
+            for project in [false, true] {
+                let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+                let input = format!("{}end", "界".repeat(80));
+                app.mode = if project {
+                    Mode::ProjectEdit(None, input)
+                } else {
+                    Mode::Edit(None, input)
+                };
+                let mut terminal = Terminal::new(TestBackend::new(width, 25))?;
+                for error in ["", "Title cannot be empty"] {
+                    app.message = error.into();
+                    terminal.draw(|frame| draw(frame, &app))?;
+                    let cells = &terminal.backend().buffer().content;
+                    let top_left = cells.iter().position(|cell| cell.symbol() == "┌").unwrap();
+                    let top_right = cells.iter().position(|cell| cell.symbol() == "┐").unwrap();
+                    let bottom_left = cells.iter().position(|cell| cell.symbol() == "└").unwrap();
+                    assert_eq!(top_right - top_left + 1, 60);
+                    assert_eq!(top_left % width as usize, (width as usize - 60) / 2);
+                    assert_eq!(
+                        (bottom_left - top_left) / width as usize + 1,
+                        if error.is_empty() { 3 } else { 4 }
+                    );
+                    let text: String = cells.iter().map(|cell| cell.symbol()).collect();
+                    assert!(
+                        text.contains("end▏"),
+                        "input tail/cursor must remain visible"
+                    );
+                    let bottom = bottom_left / width as usize;
+                    let footer: String = cells
+                        [bottom * width as usize..(bottom + 1) * width as usize]
+                        .iter()
+                        .map(|cell| cell.symbol())
+                        .collect();
+                    assert!(footer.contains("Enter: save ── Esc: cancel"));
+                    let red_rows = cells
+                        .chunks(width as usize)
+                        .filter(|row| row.iter().any(|cell| cell.fg == Color::LightRed))
+                        .count();
+                    assert_eq!(red_rows, usize::from(!error.is_empty()));
+                    if !error.is_empty() {
+                        assert!(text.contains(error));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn no_changes_notification_is_a_popup_not_a_footer_message() -> Result<()> {
