@@ -1,6 +1,113 @@
-
 use super::*;
 use std::path::Path;
+
+fn add_child_draft(app: &mut App, title: &str) -> Result<()> {
+    while matches!(&app.mode, Mode::Edit(_, draft) if draft.focus != TaskField::Subtasks) {
+        app.handle_key(KeyCode::Tab)?;
+    }
+    app.handle_key(KeyCode::Char('a'))?;
+    for character in title.chars() {
+        app.handle_key(KeyCode::Char(character))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn nested_editor_stages_saves_cancels_and_confirms_subtask_deletion() -> Result<()> {
+    let mut app = app()?;
+    app.handle_key(KeyCode::Char('a'))?;
+    for character in "parent".chars() {
+        app.handle_key(KeyCode::Char(character))?;
+    }
+    add_child_draft(&mut app, "child")?;
+    add_child_draft(&mut app, "grandchild")?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.editor_stack.len(), 1);
+    assert!(db::list_tasks(&app.db, Filter::All)?.is_empty());
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
+    assert!(app.editor_stack.is_empty());
+    add_child_draft(&mut app, "abandoned")?;
+    app.handle_key(KeyCode::Esc)?;
+    assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.subtasks.len() == 1));
+    assert!(db::list_tasks(&app.db, Filter::All)?.is_empty());
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
+    assert!(matches!(app.mode, Mode::Browse));
+    assert_eq!(app.tasks.len(), 1);
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
+
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Char('e'))?;
+    app.handle_key(KeyCode::BackTab)?;
+    app.handle_key(KeyCode::Enter)?;
+    app.handle_key(KeyCode::Char('!'))?;
+    app.handle_key(KeyCode::Esc)?;
+    assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.subtasks[0].draft.title == "child"));
+    app.handle_key(KeyCode::Char('d'))?;
+    for key in ['y', 'n', 'q'] {
+        assert!(!app.handle_key(KeyCode::Char(key))?);
+    }
+    assert!(matches!(app.mode, Mode::SubtaskDelete(..)));
+    app.handle_key(KeyCode::Esc)?;
+    app.handle_key(KeyCode::Char(' '))?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.subtasks[0].done && draft.subtasks[0].draft.subtasks[0].done)
+    );
+    app.handle_key(KeyCode::Char(' '))?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if !draft.subtasks[0].done && draft.subtasks[0].draft.subtasks[0].done)
+    );
+    app.handle_key(KeyCode::Char('d'))?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
+    app.handle_key(KeyCode::Esc)?;
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
+    app.handle_key(KeyCode::Char('e'))?;
+    app.handle_key(KeyCode::BackTab)?;
+    app.handle_key(KeyCode::Char('d'))?;
+    app.handle_key(KeyCode::Enter)?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn palette_opens_subtasks_and_editor_nesting_is_bounded() -> Result<()> {
+    let mut app = app()?;
+    app.handle_key(KeyCode::Char('a'))?;
+    app.handle_key(KeyCode::Char('p'))?;
+    add_child_draft(&mut app, "child")?;
+    app.handle_key(KeyCode::Enter)?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
+    app.toggle_palette()?;
+    for character in "child".chars() {
+        app.handle_key(KeyCode::Char(character))?;
+    }
+    app.handle_key(KeyCode::Enter)?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "child" && draft.depth == 1)
+    );
+    app.handle_key(KeyCode::Char('!'))?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?[1].title, "child!");
+    assert_eq!(
+        db::list_tasks(&app.db, Filter::All)?[1].parent_id,
+        Some(app.tasks[0].id)
+    );
+    app.mode = Mode::Edit(
+        None,
+        TaskDraft {
+            title: "leaf".into(),
+            depth: MAX_SUBTASK_DEPTH,
+            focus: TaskField::Subtasks,
+            ..TaskDraft::default()
+        },
+    );
+    app.handle_key(KeyCode::Char('a'))?;
+    assert!(app.message.contains("nesting limit"));
+    assert!(app.editor_stack.is_empty());
+    assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.subtasks.is_empty()));
+    Ok(())
+}
 
 fn app() -> Result<App> {
     App::new(db::open(Path::new(":memory:"))?)
@@ -402,7 +509,7 @@ fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
     app.handle_key(KeyCode::Backspace)?;
     app.handle_key(KeyCode::Char('c'))?;
     assert!(
-        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "t" && draft.description == "界\nc" && draft.description_focused)
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "t" && draft.description == "界\nc" && draft.focus == TaskField::Description)
     );
     app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))?;
     assert!(matches!(app.mode, Mode::Edit(..)));
@@ -412,7 +519,7 @@ fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
     app.handle_key(KeyCode::Enter)?;
     app.handle_key(KeyCode::Char('e'))?;
     assert!(
-        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "t" && draft.description == "界\nc" && !draft.description_focused)
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "t" && draft.description == "界\nc" && draft.focus == TaskField::Title)
     );
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Char('!'))?;
@@ -422,6 +529,7 @@ fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Char('!'))?;
     app.handle_key(KeyCode::Tab)?;
+    app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Enter)?;
     assert_eq!(app.tasks[0].description, "界\nc!");
     app.handle_key(KeyCode::Char('a'))?;
@@ -430,7 +538,7 @@ fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
     app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
     assert_eq!(app.message, "Title cannot be empty");
     assert!(
-        matches!(&app.mode, Mode::Edit(_, draft) if !draft.description_focused && draft.description == "x")
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.focus == TaskField::Title && draft.description == "x")
     );
     app.handle_key(KeyCode::Char('n'))?;
     app.handle_key(KeyCode::Enter)?;

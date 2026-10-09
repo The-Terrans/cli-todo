@@ -1,9 +1,13 @@
 use crate::{
-    types::{Filter, Project, Task},
+    constants::MAX_SUBTASK_DEPTH,
+    types::{Filter, Project, SubtaskDraft, Task, TaskDraft},
     Result,
 };
 use rusqlite::{params, Connection};
-use std::path::Path;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 pub fn open(path: &Path) -> Result<Connection> {
     let db = Connection::open(path)?;
@@ -28,20 +32,170 @@ pub fn open(path: &Path) -> Result<Connection> {
     }
     drop(columns);
     migrate_description(&db)?;
+    migrate_subtasks(&db)?;
+    validate_hierarchy(&db)?;
     Ok(db)
 }
 
-fn has_description(db: &Connection) -> Result<bool> {
+fn has_column(db: &Connection, column: &str) -> Result<bool> {
     Ok(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='description')",
-        [],
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name=?1)",
+        [column],
         |row| row.get(0),
     )?)
 }
 
 pub fn migrate_description(db: &Connection) -> Result<()> {
-    if !has_description(db)? {
+    if !has_column(db, "description")? {
         db.execute_batch("ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT '';")?;
+    }
+    Ok(())
+}
+
+pub fn migrate_subtasks(db: &Connection) -> Result<()> {
+    if !has_column(db, "parent_id")? {
+        db.execute_batch("ALTER TABLE tasks ADD COLUMN parent_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE;")?;
+    }
+    db.execute_batch("CREATE INDEX IF NOT EXISTS tasks_parent_id ON tasks(parent_id);")?;
+    Ok(())
+}
+
+pub fn validate_hierarchy(db: &Connection) -> Result<()> {
+    if has_column(db, "parent_id")? {
+        let valid: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_list('tasks') WHERE \"table\"='tasks' AND \"from\"='parent_id' AND on_delete='CASCADE')", [], |row| row.get(0),
+        )?;
+        if !valid {
+            return Err("Subtask schema is missing cascading parent references".into());
+        }
+    }
+    let tasks = list_tasks(db, Filter::All)?;
+    let tasks: HashMap<_, _> = tasks.iter().map(|task| (task.id, task)).collect();
+    for task in tasks.values() {
+        let mut visited = HashSet::from([task.id]);
+        let mut parent = task.parent_id;
+        while let Some(id) = parent {
+            if !visited.insert(id) {
+                return Err("Subtask hierarchy contains a cycle".into());
+            }
+            if visited.len() > MAX_SUBTASK_DEPTH + 1 {
+                return Err("Subtask nesting limit exceeded".into());
+            }
+            let ancestor = tasks.get(&id).ok_or("Subtask parent is missing")?;
+            if ancestor.project_id != task.project_id {
+                return Err("Subtasks must share their parent's project".into());
+            }
+            parent = ancestor.parent_id;
+        }
+    }
+    Ok(())
+}
+
+pub fn task_draft(db: &Connection, id: i64) -> Result<TaskDraft> {
+    validate_hierarchy(db)?;
+    let mut tasks = list_tasks(db, Filter::All)?;
+    let index = tasks
+        .iter()
+        .position(|task| task.id == id)
+        .ok_or("Task no longer exists")?;
+    let root = tasks.remove(index);
+    let mut depth = 0;
+    let mut ancestor = root.parent_id;
+    while let Some(id) = ancestor {
+        depth += 1;
+        ancestor = tasks
+            .iter()
+            .find(|task| task.id == id)
+            .ok_or("Subtask parent is missing")?
+            .parent_id;
+    }
+    let mut children: HashMap<i64, Vec<Task>> = HashMap::new();
+    for task in tasks {
+        if let Some(parent) = task.parent_id {
+            children.entry(parent).or_default().push(task);
+        }
+    }
+    Ok(draft_from_task(root, &mut children, depth))
+}
+
+fn draft_from_task(task: Task, children: &mut HashMap<i64, Vec<Task>>, depth: usize) -> TaskDraft {
+    let subtasks = children
+        .remove(&task.id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|child| SubtaskDraft {
+            id: Some(child.id),
+            done: child.done,
+            draft: draft_from_task(child, children, depth + 1),
+        })
+        .collect();
+    TaskDraft {
+        title: task.title,
+        description: task.description,
+        subtasks,
+        depth,
+        ..TaskDraft::default()
+    }
+}
+
+pub fn save_task_tree(
+    db: &Connection,
+    id: Option<i64>,
+    draft: &TaskDraft,
+    project: Option<i64>,
+) -> Result<()> {
+    let transaction = db.unchecked_transaction()?;
+    save_task_details(&transaction, id, &draft.title, &draft.description, project)?;
+    let id = id.unwrap_or_else(|| transaction.last_insert_rowid());
+    let project =
+        transaction.query_row("SELECT project_id FROM tasks WHERE id=?1", [id], |row| {
+            row.get(0)
+        })?;
+    save_children(&transaction, id, &draft.subtasks, project)?;
+    validate_hierarchy(&transaction)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn save_children(
+    db: &Connection,
+    parent: i64,
+    children: &[SubtaskDraft],
+    project: Option<i64>,
+) -> Result<()> {
+    let existing = db
+        .prepare("SELECT id FROM tasks WHERE parent_id=?1")?
+        .query_map([parent], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for id in existing {
+        if !children.iter().any(|child| child.id == Some(id)) {
+            delete_task(db, id)?;
+        }
+    }
+    let mut seen = HashSet::new();
+    for child in children {
+        if let Some(id) = child.id {
+            let owner: Option<i64> =
+                db.query_row("SELECT parent_id FROM tasks WHERE id=?1", [id], |row| {
+                    row.get(0)
+                })?;
+            if owner != Some(parent) || !seen.insert(id) {
+                return Err("Invalid subtask ownership".into());
+            }
+        }
+        save_task_details(
+            db,
+            child.id,
+            &child.draft.title,
+            &child.draft.description,
+            project,
+        )?;
+        let id = child.id.unwrap_or_else(|| db.last_insert_rowid());
+        db.execute(
+            "UPDATE tasks SET parent_id=?1,done=?2 WHERE id=?3",
+            params![parent, child.done, id],
+        )?;
+        save_children(db, id, &child.draft.subtasks, project)?;
     }
     Ok(())
 }
@@ -105,13 +259,21 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
         Filter::Completed => Some(true),
     };
     // Old Git snapshots predate descriptions and remain readable without migration.
-    let description = if has_description(db)? {
+    let description = if has_column(db, "description")? {
         "description"
     } else {
         "''"
     };
+    let (parent, subtask_count) = if has_column(db, "parent_id")? {
+        (
+            "parent_id",
+            "(SELECT COUNT(*) FROM tasks AS child WHERE child.parent_id=tasks.id)",
+        )
+    } else {
+        ("NULL", "0")
+    };
     let mut statement = db.prepare(&format!(
-        "SELECT id,title,done,project_id,{description} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY id"
+        "SELECT id,title,done,project_id,{description},{parent},{subtask_count} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY id"
     ))?;
     let rows = statement.query_map([done], |row| {
         Ok(Task {
@@ -120,6 +282,8 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
             description: row.get(4)?,
             done: row.get(2)?,
             project_id: row.get(3)?,
+            parent_id: row.get(5)?,
+            subtask_count: row.get(6)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -131,20 +295,34 @@ pub fn delete_task(db: &Connection, id: i64) -> Result<()> {
 }
 
 pub fn toggle_task(db: &Connection, id: i64) -> Result<()> {
-    db.execute("UPDATE tasks SET done=1-done WHERE id=?1", [id])?;
+    let transaction = db.unchecked_transaction()?;
+    let done: bool =
+        transaction.query_row("SELECT done FROM tasks WHERE id=?1", [id], |row| row.get(0))?;
+    transaction.execute(
+        "WITH RECURSIVE descendants(id) AS (
+            SELECT id FROM tasks WHERE id=?1
+            UNION SELECT tasks.id FROM tasks JOIN descendants ON tasks.parent_id=descendants.id
+        ) UPDATE tasks SET done=?2 WHERE id=?1 OR (?2 AND id IN descendants)",
+        params![id, !done],
+    )?;
+    transaction.commit()?;
     Ok(())
 }
 
 pub fn list_tasks_in(db: &Connection, filter: Filter, project: Option<i64>) -> Result<Vec<Task>> {
     Ok(list_tasks(db, filter)?
         .into_iter()
-        .filter(|task| task.project_id == project)
+        .filter(|task| task.parent_id.is_none() && task.project_id == project)
         .collect())
 }
 
 pub fn move_task(db: &Connection, id: i64, project: Option<i64>) -> Result<()> {
     db.execute(
-        "UPDATE tasks SET project_id=?1 WHERE id=?2",
+        "WITH RECURSIVE descendants(id) AS (
+            SELECT id FROM tasks WHERE id=?2
+            UNION SELECT tasks.id FROM tasks JOIN descendants ON tasks.parent_id=descendants.id
+        ) UPDATE tasks SET project_id=?1,parent_id=CASE WHEN id=?2 THEN NULL ELSE parent_id END
+          WHERE id IN descendants",
         params![project, id],
     )?;
     Ok(())

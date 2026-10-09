@@ -1,6 +1,138 @@
-
 use super::*;
 use std::{env, fs, time::SystemTime};
+
+fn nested_draft() -> TaskDraft {
+    let leaf = SubtaskDraft {
+        id: None,
+        done: false,
+        draft: TaskDraft {
+            title: "grandchild".into(),
+            description: "nested details".into(),
+            ..TaskDraft::default()
+        },
+    };
+    let child = SubtaskDraft {
+        id: None,
+        done: false,
+        draft: TaskDraft {
+            title: "child".into(),
+            subtasks: vec![leaf],
+            ..TaskDraft::default()
+        },
+    };
+    let sibling = SubtaskDraft {
+        id: None,
+        done: false,
+        draft: TaskDraft {
+            title: "sibling".into(),
+            ..TaskDraft::default()
+        },
+    };
+    TaskDraft {
+        title: "parent".into(),
+        subtasks: vec![child, sibling],
+        ..TaskDraft::default()
+    }
+}
+
+#[test]
+fn nested_subtasks_persist_move_and_delete_as_a_tree() -> Result<()> {
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let path = env::temp_dir().join(format!("cli-todo-subtasks-{stamp}.sqlite3"));
+    let db = open(&path)?;
+    save_task_tree(&db, None, &nested_draft(), None)?;
+    drop(db);
+    let db = open(&path)?;
+    let tasks = list_tasks(&db, Filter::All)?;
+    assert_eq!(tasks.len(), 4);
+    assert_eq!(tasks[1].parent_id, Some(tasks[0].id));
+    assert_eq!(tasks[2].parent_id, Some(tasks[1].id));
+    assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 1);
+    let loaded = task_draft(&db, tasks[0].id)?;
+    assert_eq!(
+        loaded.subtasks[0].draft.subtasks[0].draft.description,
+        "nested details"
+    );
+    assert_eq!(task_draft(&db, tasks[2].id)?.depth, 2);
+    save_project(&db, None, "Work")?;
+    let project = db.last_insert_rowid();
+    move_task(&db, tasks[0].id, Some(project))?;
+    assert!(list_tasks(&db, Filter::All)?
+        .iter()
+        .all(|task| task.project_id == Some(project)));
+    move_task(&db, tasks[1].id, None)?;
+    validate_hierarchy(&db)?;
+    assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 1);
+    assert_eq!(list_tasks_in(&db, Filter::All, None)?[0].parent_id, None);
+    delete_project(&db, project)?;
+    assert_eq!(list_tasks(&db, Filter::All)?.len(), 2);
+    delete_task(&db, tasks[1].id)?;
+    assert!(list_tasks(&db, Filter::All)?.is_empty());
+    drop(db);
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn completing_a_parent_completes_descendants_but_reopening_does_not() -> Result<()> {
+    let db = open(Path::new(":memory:"))?;
+    save_task_tree(&db, None, &nested_draft(), None)?;
+    let tasks = list_tasks(&db, Filter::All)?;
+    toggle_task(&db, tasks[0].id)?;
+    assert!(list_tasks(&db, Filter::All)?.iter().all(|task| task.done));
+    toggle_task(&db, tasks[0].id)?;
+    let reopened = list_tasks(&db, Filter::All)?;
+    assert!(!reopened[0].done);
+    assert!(reopened[1..].iter().all(|task| task.done));
+    toggle_task(&db, tasks[1].id)?;
+    assert!(!list_tasks(&db, Filter::All)?[1].done);
+    assert!(list_tasks(&db, Filter::All)?[2].done);
+    toggle_task(&db, tasks[1].id)?;
+    assert!(list_tasks(&db, Filter::All)?[1..]
+        .iter()
+        .all(|task| task.done));
+    Ok(())
+}
+
+#[test]
+fn saving_subtask_trees_rolls_back_invalid_edits_and_rejects_bad_graphs() -> Result<()> {
+    let db = open(Path::new(":memory:"))?;
+    save_task_tree(&db, None, &nested_draft(), None)?;
+    let before = list_tasks(&db, Filter::All)?;
+    let mut draft = task_draft(&db, before[0].id)?;
+    draft.title = "changed".into();
+    draft.subtasks[0].draft.subtasks[0].draft.title.clear();
+    assert!(save_task_tree(&db, Some(before[0].id), &draft, None).is_err());
+    assert_eq!(list_tasks(&db, Filter::All)?, before);
+    draft = task_draft(&db, before[0].id)?;
+    draft.subtasks[0].id = Some(before[0].id);
+    assert!(save_task_tree(&db, Some(before[0].id), &draft, None).is_err());
+    assert_eq!(list_tasks(&db, Filter::All)?, before);
+    db.execute(
+        "UPDATE tasks SET parent_id=?1 WHERE id=?2",
+        params![before[2].id, before[0].id],
+    )?;
+    assert!(validate_hierarchy(&db)
+        .unwrap_err()
+        .to_string()
+        .contains("cycle"));
+    db.execute(
+        "UPDATE tasks SET parent_id=NULL WHERE id=?1",
+        [before[0].id],
+    )?;
+    save_project(&db, None, "Other")?;
+    db.execute(
+        "UPDATE tasks SET project_id=?1 WHERE id=?2",
+        params![db.last_insert_rowid(), before[1].id],
+    )?;
+    assert!(validate_hierarchy(&db)
+        .unwrap_err()
+        .to_string()
+        .contains("project"));
+    Ok(())
+}
 
 #[test]
 fn descriptions_persist_and_legacy_tasks_get_empty_descriptions() -> Result<()> {

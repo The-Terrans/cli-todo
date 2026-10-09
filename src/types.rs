@@ -10,6 +10,8 @@ pub struct Task {
     pub description: String,
     pub done: bool,
     pub project_id: Option<i64>,
+    pub parent_id: Option<i64>,
+    pub subtask_count: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -37,11 +39,35 @@ pub enum Action {
     Quit,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub enum TaskField {
+    #[default]
+    Title,
+    Description,
+    Subtasks,
+}
+
+#[derive(Clone, Default)]
 pub struct TaskDraft {
     pub title: String,
     pub description: String,
-    pub description_focused: bool,
+    pub focus: TaskField,
+    pub subtasks: Vec<SubtaskDraft>,
+    pub selected_subtask: usize,
+    pub depth: usize,
+}
+
+#[derive(Clone)]
+pub struct SubtaskDraft {
+    pub id: Option<i64>,
+    pub done: bool,
+    pub draft: TaskDraft,
+}
+
+pub struct EditorFrame {
+    pub id: Option<i64>,
+    pub draft: TaskDraft,
+    pub adding: bool,
 }
 
 pub enum Mode {
@@ -50,6 +76,7 @@ pub enum Mode {
         scroll: u16,
     },
     Edit(Option<i64>, TaskDraft),
+    SubtaskDelete(Option<i64>, TaskDraft),
     Delete(i64),
     Nuke {
         tasks: usize,
@@ -115,5 +142,6 @@ pub struct App {
     pub navigation_focused: bool,
     pub selected_filter: usize,
     pub mode: Mode,
+    pub(crate) editor_stack: Vec<EditorFrame>,
     pub message: String,
 }

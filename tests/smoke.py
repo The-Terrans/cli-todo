@@ -83,7 +83,7 @@ with tempfile.TemporaryDirectory() as data:
         send(b"\r")
         send(b"\x1b")
         send(b"\x1b[B\r")
-        assert b"Delete task?" in send(b"d")
+        assert b"Delete task AND its subtasks?" in send(b"d")
         send(b"\x1b")
         assert len(rows()) == 1
         send(b"q")
@@ -105,7 +105,7 @@ with tempfile.TemporaryDirectory() as data:
         assert rows() == [("palette task!", 0)]
         send(b"\x0breopen\r")
         assert rows() == [("palette task!", 1)]
-        assert b"Delete task?" in send(b"\x0bdelete\r")
+        assert b"Delete task AND its subtasks?" in send(b"\x0bdelete\r")
         send(b"yn")
         assert len(rows()) == 1
         send(b"\x1b")
@@ -199,14 +199,53 @@ with tempfile.TemporaryDirectory() as data:
         proc, master, slave, before = launch()
         screen()
         assert rows() == []
-        send(b"apreserved\r")
+        send(b"aparent\t\ta")
+        send(b"child\t\ta")
+        send(b"grandchild\r\x13")
+        assert rows() == [], "nested drafts must not persist before saving the root"
+        send(b"\x13")
+        assert rows() == [("parent", 0), ("child", 0), ("grandchild", 0)]
+        with sqlite3.connect(dbpath) as db:
+            parents = db.execute("SELECT t.title,p.title FROM tasks t LEFT JOIN tasks p ON t.parent_id=p.id ORDER BY t.id").fetchall()
+            assert parents == [("parent", None), ("child", "parent"), ("grandchild", "child")]
+        send(b"0 ")
+        assert rows() == [("parent", 1), ("child", 1), ("grandchild", 1)]
+        send(b" ")
+        assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
+        assert b"Delete subtask AND its descendants?" in send(b"e\t\td")
+        send(b"ynq")
+        assert len(rows()) == 3
+        send(b"\x1bd\r")
+        assert len(rows()) == 3, "subtask deletion must remain staged"
+        send(b"\x1b")
+        assert len(rows()) == 3, "Esc at the root must cancel staged deletion"
+        send(b"cnested snapshot\r")
+        deadline = time.monotonic() + 5
+        while True:
+            checkpoint = subprocess.run(["git", "-C", str(history), "show", "HEAD:tasks.sqlite3"], capture_output=True)
+            if checkpoint.returncode == 0:
+                break
+            assert time.monotonic() < deadline, "subtask checkpoint did not finish"
+            time.sleep(0.05)
+        nested_snapshot = Path(data) / "nested-snapshot.sqlite3"
+        nested_snapshot.write_bytes(checkpoint.stdout)
+        with sqlite3.connect(nested_snapshot) as db:
+            assert db.execute("SELECT count(*) FROM tasks WHERE parent_id IS NOT NULL").fetchone()[0] == 2
+        send(b"q")
+        finish(0)
+        proc, master, slave, before = launch()
+        screen()
+        assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
+        send(b"0d\r")
+        assert rows() == [], "deleting a parent must delete its descendants"
+        send(b"1apreserved\r")
         with sqlite3.connect(dbpath) as db:
             db.execute("CREATE TRIGGER fail_insert BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT, 'smoke forced error'); END")
         output = send(b"afailure\r")
         assert b"smoke forced error" in output
         finish(1)
         assert rows() == [("preserved", 0)]
-        print("PASS: PTY descriptions/Tab/Ctrl+S, help, navigation, palette, projects, checkpoints, sync, nuke, persistence, terminal restoration")
+        print("PASS: PTY nested subtasks, descriptions/Tab/Ctrl+S, help, navigation, palette, projects, checkpoints, sync, nuke, persistence, terminal restoration")
     finally:
         if proc.poll() is None:
             proc.kill()

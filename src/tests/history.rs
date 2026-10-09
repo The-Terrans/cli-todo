@@ -1,7 +1,98 @@
-
 use super::*;
 use crate::db;
 use std::{env, time::SystemTime};
+
+#[test]
+fn snapshots_preserve_subtasks_and_pull_rejects_cyclic_trees() -> Result<()> {
+    use crate::types::{SubtaskDraft, TaskDraft};
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let root = env::temp_dir().join(format!("cli-todo-subtask-sync-{stamp}"));
+    let remote = root.join("remote.git");
+    fs::create_dir_all(root.join("one"))?;
+    fs::create_dir_all(root.join("two"))?;
+    assert!(Command::new("git")
+        .args(["init", "--bare", "--quiet", "--initial-branch=main"])
+        .arg(&remote)
+        .output()?
+        .status
+        .success());
+    let first = db::open(&root.join("one/tasks.sqlite3"))?;
+    let mut second = db::open(&root.join("two/tasks.sqlite3"))?;
+    let a = History::new(&first).unwrap();
+    let b = History::new(&second).unwrap();
+    a.set_remote(remote.to_str().unwrap())?;
+    b.set_remote(remote.to_str().unwrap())?;
+    configure_author(&a)?;
+    let leaf = SubtaskDraft {
+        id: None,
+        done: false,
+        draft: TaskDraft {
+            title: "grandchild".into(),
+            description: "deep\ndetails".into(),
+            ..TaskDraft::default()
+        },
+    };
+    let child = SubtaskDraft {
+        id: None,
+        done: false,
+        draft: TaskDraft {
+            title: "child".into(),
+            subtasks: vec![leaf],
+            ..TaskDraft::default()
+        },
+    };
+    let draft = TaskDraft {
+        title: "parent".into(),
+        subtasks: vec![child],
+        ..TaskDraft::default()
+    };
+    db::save_task_tree(&first, None, &draft, None)?;
+    a.commit(&first, "nested tasks")?;
+    assert!(!a.has_changes(&first)?);
+    a.push()?;
+    let SyncResult::Pull(plan) = b.fetch_pull()? else {
+        panic!("expected snapshot");
+    };
+    b.apply_pull(&mut second, plan)?;
+    assert_eq!(
+        db::list_tasks(&first, Filter::All)?,
+        db::list_tasks(&second, Filter::All)?
+    );
+    db::toggle_task(&first, 1)?;
+    assert!(a.has_changes(&first)?);
+    a.commit(&first, "complete tree")?;
+    a.push()?;
+    let SyncResult::Pull(plan) = b.fetch_pull()? else {
+        panic!("expected snapshot");
+    };
+    b.apply_pull(&mut second, plan)?;
+    assert!(db::list_tasks(&second, Filter::All)?
+        .iter()
+        .all(|task| task.done));
+    let before = db::list_tasks(&second, Filter::All)?;
+    let head = b.head()?;
+    let backups = fs::read_dir(root.join("two/backups"))?.count();
+    first.execute_batch("UPDATE tasks SET parent_id=2 WHERE id=1;")?;
+    a.commit(&first, "untrusted cyclic snapshot")?;
+    a.push()?;
+    let SyncResult::Pull(plan) = b.fetch_pull()? else {
+        panic!("expected snapshot");
+    };
+    assert!(b
+        .apply_pull(&mut second, plan)
+        .unwrap_err()
+        .to_string()
+        .contains("cycle"));
+    assert_eq!(db::list_tasks(&second, Filter::All)?, before);
+    assert_eq!(b.head()?, head);
+    assert_eq!(fs::read_dir(root.join("two/backups"))?.count(), backups);
+    drop(first);
+    drop(second);
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
 
 fn configure_author(history: &History) -> Result<()> {
     history.git_text(&["config", "user.name", "Todo Test"])?;
@@ -39,7 +130,7 @@ fn remote_sync_preserves_local_changes_and_fast_forwards_snapshots() -> Result<(
     configure_author(&a)?;
     db::save_project(&first, None, "Work")?;
     db::create_task(&first, "first", Some(first.last_insert_rowid()))?;
-    first.execute_batch("ALTER TABLE tasks DROP COLUMN description;")?;
+    first.execute_batch("ALTER TABLE tasks DROP COLUMN description; DROP INDEX tasks_parent_id; ALTER TABLE tasks DROP COLUMN parent_id;")?;
     a.commit(&first, "first checkpoint")?;
     a.push()?;
     b.set_remote(remote)?;
@@ -54,6 +145,7 @@ fn remote_sync_preserves_local_changes_and_fast_forwards_snapshots() -> Result<(
     assert!(matches!(b.fetch_pull()?, SyncResult::Message(_)));
 
     db::migrate_description(&first)?;
+    db::migrate_subtasks(&first)?;
     db::save_task_details(
         &first,
         Some(1),

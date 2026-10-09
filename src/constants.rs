@@ -1,5 +1,7 @@
 use crate::types::{Action, Filter};
 
+pub const MAX_SUBTASK_DEPTH: usize = 64;
+
 pub const FILTERS: [(&str, Filter); 3] = [
     ("All", Filter::All),
     ("Pending", Filter::Pending),
@@ -37,13 +39,23 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Backspace     Remove last character",
     "  Enter         Save title/text; run search result; choose destination",
     "  Enter         Insert newline when task Description is focused",
-    "  Tab           Toggle task Title/Description",
-    "  Ctrl+S        Save task from Description",
+    "  Tab/Shift+Tab Cycle task Title / Description / Subtasks",
+    "  Ctrl+S        Save editor from Description/Subtasks",
     "  Up / Down     Choose search result or move destination",
     "  Esc           Cancel dialog/search/move",
     "  Ctrl+K        Close palette; does not interrupt other dialogs",
     "  Empty origin  Save empty input to remove remote settings",
     "  Enter / Esc   Close the no-changes commit popup",
+    "",
+    "SUBTASKS (IN THE TASK EDITOR)",
+    "  a             Add a nested subtask draft",
+    "  Up / Down     Select a subtask",
+    "  Enter / e     Open the selected subtask editor",
+    "  Space         Complete subtree; reopen only selected subtask",
+    "  d             Remove subtask and descendants with confirmation",
+    "  Save / Esc    Return to parent; stage/cancel this child draft",
+    "  Root save     Persist the entire task tree atomically",
+    "  Root Esc      Discard all staged subtask changes",
     "",
     "CONFIRMATIONS",
     "  Enter         Confirm task/project deletion or nuke",

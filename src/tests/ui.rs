@@ -1,9 +1,129 @@
-
 use super::*;
 use crate::{db, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
 use std::path::Path;
+
+#[test]
+fn titles_show_direct_subtask_counts_in_lists_and_editors() -> Result<()> {
+    use crate::types::SubtaskDraft;
+    let db = db::open(Path::new(":memory:"))?;
+    let leaf = SubtaskDraft {
+        id: None,
+        done: true,
+        draft: TaskDraft {
+            title: "grandchild".into(),
+            ..TaskDraft::default()
+        },
+    };
+    let child = SubtaskDraft {
+        id: None,
+        done: true,
+        draft: TaskDraft {
+            title: "child".into(),
+            subtasks: vec![leaf],
+            ..TaskDraft::default()
+        },
+    };
+    let sibling = SubtaskDraft {
+        id: None,
+        done: false,
+        draft: TaskDraft {
+            title: "sibling".into(),
+            ..TaskDraft::default()
+        },
+    };
+    db::save_task_tree(
+        &db,
+        None,
+        &TaskDraft {
+            title: "parent".into(),
+            subtasks: vec![child, sibling],
+            ..TaskDraft::default()
+        },
+        None,
+    )?;
+    db::save_task_details(&db, None, "solo", "", None)?;
+    let mut app = App::new(db)?;
+    assert_eq!(app.tasks[0].subtask_count, 2);
+    assert_eq!(app.tasks[1].subtask_count, 0);
+    let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("parent (2 subtasks)"));
+    assert!(!text.contains("solo ("));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE))?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("child (1 subtask)"));
+    assert!(!text.contains("sibling ("));
+    assert_eq!(subtask_count_label(0), "");
+    assert_eq!(subtask_count_label(1), " (1 subtask)");
+    Ok(())
+}
+
+#[test]
+fn subtasks_are_managed_in_the_editor_with_one_focused_cursor() -> Result<()> {
+    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    app.mode = Mode::Edit(
+        None,
+        TaskDraft {
+            title: "parent".into(),
+            focus: TaskField::Subtasks,
+            subtasks: vec![crate::types::SubtaskDraft {
+                id: None,
+                done: false,
+                draft: TaskDraft {
+                    title: "child".into(),
+                    ..TaskDraft::default()
+                },
+            }],
+            ..TaskDraft::default()
+        },
+    );
+    let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let cells = &terminal.backend().buffer().content;
+    let text: String = cells.iter().map(|cell| cell.symbol()).collect();
+    assert!(text.contains("Subtasks"));
+    assert!(text.contains("[ ] child"));
+    assert!(text.contains("Enter:edit"));
+    assert!(text.contains("<c-s>:save"));
+    assert!(text.contains("Esc:cancel"));
+    assert_eq!(
+        cells
+            .iter()
+            .filter(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
+            .count(),
+        1
+    );
+    assert_eq!(
+        cells
+            .iter()
+            .filter(|cell| cell.symbol().contains('▏'))
+            .count(),
+        0
+    );
+    let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
+    assert_eq!(corners.len(), 3);
+    assert_eq!(corners[0].fg, Color::DarkGray);
+    assert_eq!(corners[1].fg, Color::DarkGray);
+    assert_eq!(corners[2].fg, Color::LightYellow);
+    Ok(())
+}
 
 #[test]
 fn task_descriptions_use_a_dim_preview_without_extra_empty_rows() -> Result<()> {
@@ -105,14 +225,18 @@ fn task_editor_shows_only_the_focused_fields_footer_and_cursor() -> Result<()> {
         TaskDraft {
             title: "task".into(),
             description: format!("{}\nLAST", "界 words 😀 ".repeat(100)),
-            description_focused: false,
+            ..TaskDraft::default()
         },
     );
     for focused in [false, true] {
         let Mode::Edit(_, draft) = &mut app.mode else {
             unreachable!();
         };
-        draft.description_focused = focused;
+        draft.focus = if focused {
+            TaskField::Description
+        } else {
+            TaskField::Title
+        };
         let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
         terminal.draw(|frame| draw(frame, &app))?;
         let cells = &terminal.backend().buffer().content;
@@ -131,7 +255,8 @@ fn task_editor_shows_only_the_focused_fields_footer_and_cursor() -> Result<()> {
         );
         assert!(text.contains(if focused { "LAST▏" } else { "task▏" }));
         let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
-        assert_eq!(corners.len(), 2);
+        assert_eq!(corners.len(), 3);
+        assert_eq!(corners[2].fg, Color::DarkGray);
         assert_eq!(
             corners[0].fg,
             if focused {

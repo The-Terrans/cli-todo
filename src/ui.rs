@@ -1,6 +1,6 @@
 use crate::{
     constants::{FILTERS, KEYBINDINGS},
-    types::{App, Mode, TaskDraft},
+    types::{App, Mode, TaskDraft, TaskField},
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
@@ -193,7 +193,12 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::Reset)
         };
         let mut lines = vec![Line::styled(
-            format!("[{}] {}", if task.done { "x" } else { " " }, task.title,),
+            format!(
+                "[{}] {}{}",
+                if task.done { "x" } else { " " },
+                task.title,
+                subtask_count_label(task.subtask_count)
+            ),
             title_style,
         )];
         let mut description = task
@@ -307,10 +312,23 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
             "All tasks in this project will be permanently deleted.\nEnter: confirm · Esc: cancel"
                 .into(),
         ),
-        Mode::Edit(id, draft) => return draw_task_editor(frame, id.is_some(), draft, &app.message),
+        Mode::Edit(id, draft) => {
+            return draw_task_editor(
+                frame,
+                id.is_some(),
+                draft,
+                &app.message,
+                !app.editor_stack.is_empty(),
+            )
+        }
+        Mode::SubtaskDelete(..) => (
+            " Delete subtask AND its descendants? ",
+            "Remove this subtask tree from the draft?\nEnter: confirm · Esc: cancel".into(),
+        ),
         Mode::Delete(_) => (
-            " Delete task? ",
-            "Permanently delete selected task?\nEnter: confirm · Esc: cancel".into(),
+            " Delete task AND its subtasks? ",
+            "Permanently delete this task and its descendants?\nEnter: confirm · Esc: cancel"
+                .into(),
         ),
     };
     let area = dialog_area(frame.area(), 6);
@@ -318,11 +336,20 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(text).block(panel(title, true)), area);
 }
 
-fn draw_task_editor(frame: &mut Frame, editing: bool, draft: &TaskDraft, message: &str) {
+fn draw_task_editor(
+    frame: &mut Frame,
+    editing: bool,
+    draft: &TaskDraft,
+    message: &str,
+    subtask: bool,
+) {
+    let title_focused = draft.focus == TaskField::Title;
+    let description_focused = draft.focus == TaskField::Description;
     let area = task_editor_area(frame.area());
     let rows = Layout::vertical([
         Constraint::Length(if message.is_empty() { 3 } else { 4 }),
-        Constraint::Min(3),
+        Constraint::Fill(1),
+        Constraint::Fill(1),
     ])
     .split(area);
     let hint = Style::default()
@@ -330,32 +357,33 @@ fn draw_task_editor(frame: &mut Frame, editing: bool, draft: &TaskDraft, message
         .bg(Color::Reset)
         .remove_modifier(Modifier::BOLD);
     let mut title = panel(
-        if editing {
-            " Edit task: Title "
-        } else {
-            " Add task: Title "
+        match (editing, subtask) {
+            (true, true) => " Edit subtask: Title ",
+            (false, true) => " Add subtask: Title ",
+            (true, false) => " Edit task: Title ",
+            (false, false) => " Add task: Title ",
         },
-        !draft.description_focused,
+        title_focused,
     );
-    if !draft.description_focused {
+    if title_focused {
         title = title.title_bottom(
             Line::styled(" Enter: save ── Esc: cancel ", hint).alignment(Alignment::Right),
         );
     }
     let title_inner = title.inner(rows[0]);
-    let title_text = Line::raw(if draft.description_focused {
-        draft.title.clone()
-    } else {
+    let title_text = Line::raw(if title_focused {
         format!("{}▏", draft.title)
+    } else {
+        draft.title.clone()
     });
     let horizontal = title_text
         .width()
         .saturating_sub(title_inner.width as usize)
         .min(u16::MAX as usize) as u16;
-    let mut description = panel(" Description ", draft.description_focused).title(
+    let mut description = panel(" Description ", description_focused).title(
         Line::styled(
             " Press <tab> to toggle focus ",
-            hint.fg(if draft.description_focused {
+            hint.fg(if description_focused {
                 Color::LightYellow
             } else {
                 Color::Gray
@@ -363,19 +391,19 @@ fn draw_task_editor(frame: &mut Frame, editing: bool, draft: &TaskDraft, message
         )
         .alignment(Alignment::Right),
     );
-    if draft.description_focused {
+    if description_focused {
         description = description.title_bottom(
             Line::styled(" <c-s>: save ── Esc: cancel ", hint).alignment(Alignment::Right),
         );
     }
     let description_inner = description.inner(rows[1]);
-    let text = if draft.description_focused {
+    let text = if description_focused {
         format!("{}▏", draft.description)
     } else {
         draft.description.clone()
     };
     let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
-    let vertical = if draft.description_focused {
+    let vertical = if description_focused {
         paragraph
             .line_count(description_inner.width)
             .saturating_sub(description_inner.height as usize)
@@ -405,6 +433,58 @@ fn draw_task_editor(frame: &mut Frame, editing: bool, draft: &TaskDraft, message
     }
     frame.render_widget(description, rows[1]);
     frame.render_widget(paragraph.scroll((vertical, 0)), description_inner);
+    draw_subtasks(frame, rows[2], draft);
+}
+
+fn subtask_count_label(count: usize) -> String {
+    match count {
+        0 => String::new(),
+        1 => " (1 subtask)".into(),
+        _ => format!(" ({count} subtasks)"),
+    }
+}
+
+fn draw_subtasks(frame: &mut Frame, area: Rect, draft: &TaskDraft) {
+    let focused = draft.focus == TaskField::Subtasks;
+    let hint = Style::default()
+        .fg(Color::LightYellow)
+        .bg(Color::Reset)
+        .remove_modifier(Modifier::BOLD);
+    let mut block = panel(" Subtasks ", focused);
+    if focused {
+        block = block
+            .title(Line::styled(" Space: complete/reopen ", hint).alignment(Alignment::Right))
+            .title_bottom(
+                Line::styled(
+                    " a:add · Enter:edit · d:delete · <c-s>:save · Esc:cancel ",
+                    hint,
+                )
+                .alignment(Alignment::Right),
+            );
+    }
+    let inner = block.inner(area);
+    let items = draft.subtasks.iter().map(|child| {
+        let descendants = subtask_count_label(child.draft.subtasks.len());
+        ListItem::new(format!(
+            "[{}] {}{descendants}",
+            if child.done { "x" } else { " " },
+            child.draft.title
+        ))
+    });
+    let mut state = ListState::default()
+        .with_selected((focused && !draft.subtasks.is_empty()).then_some(draft.selected_subtask));
+    frame.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_spacing(HighlightSpacing::Always)
+            .highlight_style(selection_style())
+            .highlight_symbol("> "),
+        area,
+        &mut state,
+    );
+    if draft.subtasks.is_empty() {
+        frame.render_widget(Paragraph::new("a: add a subtask"), inner);
+    }
 }
 
 fn draw_input_dialog(frame: &mut Frame, title: &str, text: &str, message: &str, submit: &str) {

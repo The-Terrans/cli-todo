@@ -50,13 +50,25 @@ Navigation offers All, Pending, and Completed filters. Arrows apply the filter i
 
 ## Task descriptions
 
-Adding or editing a task opens **Title** and **Description** sections using 70% of the terminal width, centered with a minimum width of 60 columns. The editor also uses 70% of the terminal height (minimum 12 rows, reduced to fit), centered vertically. Title stays compact; Description fills the extra height. On smaller terminals, both dimensions shrink to fit. Title is focused initially: **Enter** saves the whole task and **Esc** cancels. **Tab** toggles focus, with a hint on Description's top-right border.
+Adding or editing a task opens **Title**, **Description**, and **Subtasks** sections using 70% of the terminal width, centered with a minimum width of 60 columns. The editor also uses 70% of the terminal height (minimum 12 rows, reduced to fit), centered vertically. Title stays compact; Description and Subtasks share the extra height. On smaller terminals, both dimensions shrink to fit. Title is focused initially: **Enter** saves the whole task and **Esc** cancels. **Tab** cycles Title → Description → Subtasks; **Shift+Tab** cycles backward. Description's top-right border shows the focus hint.
 
 In Description, **Enter** inserts a newline and **Ctrl+S** saves the entire task. **Esc** cancels all draft changes. Only the focused field shows its save/cancel footer and cursor. Description text wraps and scrolls to keep the input end visible. Editing remains append/backspace only; descriptions are optional and preserve whitespace.
 
 The task list shows the first nonblank description line beneath its title, indented in dim dark gray. An ellipsis indicates additional lines; open the editor for the full text. Empty descriptions take no extra row. Terminal font size is fixed, so subdued styling provides the visual hierarchy.
 
 Existing tasks get empty descriptions automatically. Descriptions persist across restarts and are included in Git snapshots and safe Pull. Older snapshots without descriptions remain readable and are upgraded when applied.
+
+## Subtasks
+
+Open a task with **e** or **Enter**, then press **Tab twice** to focus **Subtasks**. **a** opens a child editor; children have their own title, description, and Subtasks section. Nesting supports up to 64 levels.
+
+1. **Up/Down** selects a child; **Enter/e** edits it.
+2. **Space** completes that child and every descendant. Reopening it leaves descendants unchanged. Completing a task in the main list likewise completes its entire tree.
+3. **d** stages removal of a child and its descendants after Enter/Esc confirmation.
+4. Saving a child returns to its parent draft; **Esc** cancels that child edit.
+5. Save the outermost editor with **Enter from Title** or **Ctrl+S from Description/Subtasks** to persist the whole tree in one transaction. **Esc at the outermost editor discards all staged changes**.
+
+Only top-level tasks appear in Inbox/project lists; manage children inside the editor. Titles show their direct-child count, such as `Task (2 subtasks)`, in both lists and editors. Completed children count too; tasks without children show no count. Ctrl+K searches subtasks too and opens their editor directly. Subtasks inherit their parent's project; moving or deleting a task affects its entire subtree. Descriptions, completion state, and parent relationships persist across restarts and Git snapshots. Legacy databases and snapshots migrate automatically; safe Pull rejects cycles, missing parents, and cross-project child references.
 
 ## Projects
 

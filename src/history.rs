@@ -384,6 +384,7 @@ impl History {
         }
         crate::db::list_tasks(&source, Filter::All)?;
         crate::db::list_projects(&source)?;
+        crate::db::validate_hierarchy(&source)?;
         let valid_schema: bool = source.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_list('tasks') WHERE \"table\"='projects' AND \"from\"='project_id' AND on_delete='CASCADE')",
             [], |row| row.get(0),
@@ -423,6 +424,8 @@ impl History {
         ])?;
         let apply = copy_database(&source, database)
             .and_then(|_| crate::db::migrate_description(database))
+            .and_then(|_| crate::db::migrate_subtasks(database))
+            .and_then(|_| crate::db::validate_hierarchy(database))
             .and_then(|_| {
                 self.git_text(&["merge", "--ff-only", "--no-edit", &plan.hash])
                     .map(|_| ())

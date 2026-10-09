@@ -1,7 +1,10 @@
 use crate::{
-    constants::{ACTIONS, FILTERS, KEYBINDINGS},
+    constants::{ACTIONS, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH},
     db,
-    types::{Action, App, Filter, History, Mode, SyncResult, TaskDraft},
+    types::{
+        Action, App, EditorFrame, Filter, History, Mode, SubtaskDraft, SyncResult, TaskDraft,
+        TaskField,
+    },
     Result,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -32,6 +35,7 @@ impl App {
             navigation_focused: true,
             selected_filter: 0,
             mode: Mode::Browse,
+            editor_stack: vec![],
             message: String::new(),
             db,
         };
@@ -99,7 +103,7 @@ impl App {
             return Ok(false);
         }
         if modifiers == KeyModifiers::CONTROL && matches!(key.code, KeyCode::Char('s' | 'S')) {
-            if matches!(&self.mode, Mode::Edit(_, draft) if draft.description_focused) {
+            if matches!(&self.mode, Mode::Edit(_, draft) if draft.focus != TaskField::Title) {
                 let changes = self.db.total_changes();
                 self.message.clear();
                 let result = self.save_edit();
@@ -141,6 +145,7 @@ impl App {
             Mode::Browse => self.handle_browse_key(key)?,
             Mode::Help { .. } => self.handle_help_key(key),
             Mode::Edit(..) => self.handle_edit_key(key)?,
+            Mode::SubtaskDelete(..) => self.handle_subtask_delete_key(key),
             Mode::Delete(id) => self.handle_delete_key(key, id)?,
             Mode::Nuke { .. } => self.handle_nuke_key(key)?,
             Mode::Palette { .. } => return self.handle_palette_key(key),
@@ -607,18 +612,13 @@ impl App {
                 if self.commits_focused {
                     self.focus_inbox()?;
                 }
+                self.editor_stack.clear();
                 self.mode = Mode::Edit(None, TaskDraft::default());
             }
             Action::Edit => {
                 if let Some(task) = self.tasks.get(self.selected_task) {
-                    self.mode = Mode::Edit(
-                        Some(task.id),
-                        TaskDraft {
-                            title: task.title.clone(),
-                            description: task.description.clone(),
-                            description_focused: false,
-                        },
-                    );
+                    self.editor_stack.clear();
+                    self.mode = Mode::Edit(Some(task.id), db::task_draft(&self.db, task.id)?);
                 }
             }
             Action::Delete => {
@@ -663,6 +663,9 @@ impl App {
                 self.select_filter(0)?;
                 if let Some(index) = self.tasks.iter().position(|task| task.id == id) {
                     self.selected_task = index;
+                } else {
+                    self.editor_stack.clear();
+                    self.mode = Mode::Edit(Some(id), db::task_draft(&self.db, id)?);
                 }
                 self.navigation_focused = false;
             }
@@ -762,44 +765,163 @@ impl App {
         let Mode::Edit(_, draft) = &mut self.mode else {
             return Ok(());
         };
-        let text = if draft.description_focused {
-            &mut draft.description
-        } else {
-            &mut draft.title
-        };
         match key {
-            KeyCode::Esc => self.mode = Mode::Browse,
-            KeyCode::Tab | KeyCode::BackTab => {
-                draft.description_focused = !draft.description_focused
+            KeyCode::Esc => self.cancel_edit(),
+            KeyCode::Tab => {
+                draft.focus = match draft.focus {
+                    TaskField::Title => TaskField::Description,
+                    TaskField::Description => TaskField::Subtasks,
+                    TaskField::Subtasks => TaskField::Title,
+                }
+            }
+            KeyCode::BackTab => {
+                draft.focus = match draft.focus {
+                    TaskField::Title => TaskField::Subtasks,
+                    TaskField::Description => TaskField::Title,
+                    TaskField::Subtasks => TaskField::Description,
+                }
+            }
+            _ if draft.focus == TaskField::Subtasks => self.handle_subtasks_key(key),
+            KeyCode::Enter if draft.focus == TaskField::Description => draft.description.push('\n'),
+            KeyCode::Enter => self.save_edit()?,
+            KeyCode::Char(character) => {
+                if draft.focus == TaskField::Description {
+                    draft.description.push(character);
+                } else {
+                    draft.title.push(character);
+                }
             }
             KeyCode::Backspace => {
-                text.pop();
+                if draft.focus == TaskField::Description {
+                    draft.description.pop();
+                } else {
+                    draft.title.pop();
+                }
             }
-            KeyCode::Char(character) => text.push(character),
-            KeyCode::Enter if draft.description_focused => text.push('\n'),
-            KeyCode::Enter => self.save_edit()?,
             _ => {}
         }
         Ok(())
     }
 
+    fn cancel_edit(&mut self) {
+        self.mode = if let Some(mut parent) = self.editor_stack.pop() {
+            if parent.adding {
+                parent.draft.subtasks.remove(parent.draft.selected_subtask);
+            }
+            parent.draft.selected_subtask = parent
+                .draft
+                .selected_subtask
+                .min(parent.draft.subtasks.len().saturating_sub(1));
+            Mode::Edit(parent.id, parent.draft)
+        } else {
+            Mode::Browse
+        };
+    }
+
+    fn handle_subtasks_key(&mut self, key: KeyCode) {
+        let Mode::Edit(_, draft) = &mut self.mode else {
+            return;
+        };
+        match key {
+            KeyCode::Up => draft.selected_subtask = draft.selected_subtask.saturating_sub(1),
+            KeyCode::Down => {
+                draft.selected_subtask =
+                    (draft.selected_subtask + 1).min(draft.subtasks.len().saturating_sub(1))
+            }
+            KeyCode::Char('a') => self.open_subtask(true),
+            KeyCode::Enter | KeyCode::Char('e') => self.open_subtask(false),
+            KeyCode::Char(' ') => {
+                if let Some(child) = draft.subtasks.get_mut(draft.selected_subtask) {
+                    if child.done {
+                        child.done = false;
+                    } else {
+                        Self::complete_subtask(child);
+                    }
+                }
+            }
+            KeyCode::Char('d') if !draft.subtasks.is_empty() => {
+                if let Mode::Edit(id, draft) = std::mem::replace(&mut self.mode, Mode::Browse) {
+                    self.mode = Mode::SubtaskDelete(id, draft);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn complete_subtask(child: &mut SubtaskDraft) {
+        child.done = true;
+        for descendant in &mut child.draft.subtasks {
+            Self::complete_subtask(descendant);
+        }
+    }
+
+    fn open_subtask(&mut self, adding: bool) {
+        if adding && matches!(&self.mode, Mode::Edit(_, draft) if draft.depth >= MAX_SUBTASK_DEPTH)
+        {
+            self.message = "Subtask nesting limit reached".into();
+            return;
+        }
+        let Mode::Edit(id, mut draft) = std::mem::replace(&mut self.mode, Mode::Browse) else {
+            return;
+        };
+        if adding {
+            draft.selected_subtask = draft.subtasks.len();
+            draft.subtasks.push(SubtaskDraft {
+                id: None,
+                done: false,
+                draft: TaskDraft {
+                    depth: draft.depth + 1,
+                    ..TaskDraft::default()
+                },
+            });
+        }
+        let Some(child) = draft.subtasks.get(draft.selected_subtask) else {
+            self.mode = Mode::Edit(id, draft);
+            return;
+        };
+        let mut child_draft = child.draft.clone();
+        child_draft.focus = TaskField::Title;
+        child_draft.depth = draft.depth + 1;
+        self.mode = Mode::Edit(child.id, child_draft);
+        self.editor_stack.push(EditorFrame { id, draft, adding });
+    }
+
+    fn handle_subtask_delete_key(&mut self, key: KeyCode) {
+        if !matches!(key, KeyCode::Enter | KeyCode::Esc) {
+            return;
+        }
+        let Mode::SubtaskDelete(id, mut draft) = std::mem::replace(&mut self.mode, Mode::Browse)
+        else {
+            return;
+        };
+        if key == KeyCode::Enter {
+            draft.subtasks.remove(draft.selected_subtask);
+            draft.selected_subtask = draft
+                .selected_subtask
+                .min(draft.subtasks.len().saturating_sub(1));
+        }
+        self.mode = Mode::Edit(id, draft);
+    }
+
     fn save_edit(&mut self) -> Result<()> {
-        let Mode::Edit(id, draft) = &mut self.mode else {
+        let Mode::Edit(id, mut draft) = std::mem::replace(&mut self.mode, Mode::Browse) else {
             return Ok(());
         };
         if draft.title.trim().is_empty() {
-            draft.description_focused = false;
+            draft.focus = TaskField::Title;
             self.message = "Title cannot be empty".into();
+            self.mode = Mode::Edit(id, draft);
             return Ok(());
         }
-        db::save_task_details(
-            &self.db,
-            *id,
-            &draft.title,
-            &draft.description,
-            self.current_project,
-        )?;
-        self.mode = Mode::Browse;
+        if let Some(mut parent) = self.editor_stack.pop() {
+            parent.draft.subtasks[parent.draft.selected_subtask].draft = draft;
+            self.mode = Mode::Edit(parent.id, parent.draft);
+            return Ok(());
+        }
+        if let Err(error) = db::save_task_tree(&self.db, id, &draft, self.current_project) {
+            self.mode = Mode::Edit(id, draft);
+            return Err(error);
+        }
         self.refresh_tasks()
     }
 
