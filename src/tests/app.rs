@@ -1,6 +1,53 @@
 use super::*;
 use std::path::Path;
 
+#[test]
+fn due_dates_validate_preserve_drafts_and_can_be_cleared() -> Result<()> {
+    let mut app = app()?;
+    app.handle_key(KeyCode::Char('a'))?;
+    for c in "dated task".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    app.handle_key(KeyCode::Tab)?;
+    for c in "notes".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    app.handle_key(KeyCode::Tab)?;
+    for c in "2026-02-30".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    app.handle_key(KeyCode::Enter)?;
+    assert!(app.message.contains("YYYY-MM-DD"));
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.focus == TaskField::DueDate && draft.title == "dated task" && draft.description == "notes")
+    );
+    assert!(db::list_tasks(&app.db, Filter::All)?.is_empty());
+    for _ in 0..10 {
+        app.handle_key(KeyCode::Backspace)?;
+    }
+    for c in "2028-02-29".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
+    assert_eq!(app.tasks[0].due_date, parse_due_date("2028-02-29")?);
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Char('e'))?;
+    app.handle_key(KeyCode::Tab)?;
+    app.handle_key(KeyCode::Tab)?;
+    app.handle_key(KeyCode::Backspace)?;
+    app.handle_key(KeyCode::Esc)?;
+    assert_eq!(app.tasks[0].due_date, parse_due_date("2028-02-29")?);
+    app.handle_key(KeyCode::Char('e'))?;
+    app.handle_key(KeyCode::Tab)?;
+    app.handle_key(KeyCode::Tab)?;
+    for _ in 0..10 {
+        app.handle_key(KeyCode::Backspace)?;
+    }
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[0].due_date, None);
+    Ok(())
+}
+
 fn add_child_draft(app: &mut App, title: &str) -> Result<()> {
     while matches!(&app.mode, Mode::Edit(_, draft) if draft.focus != TaskField::Subtasks) {
         app.handle_key(KeyCode::Tab)?;
@@ -528,6 +575,7 @@ fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
     app.handle_key(KeyCode::Char('e'))?;
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Char('!'))?;
+    app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Enter)?;

@@ -1,6 +1,42 @@
 use super::*;
 use std::{env, fs, time::SystemTime};
 
+#[test]
+fn due_dates_persist_for_tasks_and_subtasks_without_reordering() -> Result<()> {
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let path = env::temp_dir().join(format!("cli-todo-dates-{stamp}.sqlite3"));
+    let db = open(&path)?;
+    let mut draft = nested_draft();
+    draft.due_date = "2030-12-31".into();
+    draft.subtasks[0].draft.due_date = "2028-02-29".into();
+    save_task_tree(&db, None, &draft, None)?;
+    drop(db);
+    let db = open(&path)?;
+    let tasks = list_tasks(&db, Filter::All)?;
+    assert_eq!(tasks[0].title, "parent");
+    assert_eq!(tasks[0].due_date, parse_due_date("2030-12-31")?);
+    assert_eq!(tasks[1].due_date, parse_due_date("2028-02-29")?);
+    let mut loaded = task_draft(&db, tasks[0].id)?;
+    assert_eq!(loaded.subtasks[0].draft.due_date, "2028-02-29");
+    loaded.due_date.clear();
+    save_task_tree(&db, Some(tasks[0].id), &loaded, None)?;
+    assert_eq!(list_tasks(&db, Filter::All)?[0].due_date, None);
+    assert_eq!(
+        list_tasks(&db, Filter::All)?[1].due_date,
+        parse_due_date("2028-02-29")?
+    );
+    let before = list_tasks(&db, Filter::All)?;
+    loaded.title = "changed".into();
+    loaded.subtasks[0].draft.due_date = "2026-02-30".into();
+    assert!(save_task_tree(&db, Some(tasks[0].id), &loaded, None).is_err());
+    assert_eq!(list_tasks(&db, Filter::All)?, before);
+    drop(db);
+    fs::remove_file(path)?;
+    Ok(())
+}
+
 fn nested_draft() -> TaskDraft {
     let leaf = SubtaskDraft {
         id: None,

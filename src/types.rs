@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use rusqlite::Connection;
 use std::{error::Error, path::PathBuf, sync::mpsc::Receiver};
 
@@ -12,6 +13,7 @@ pub struct Task {
     pub project_id: Option<i64>,
     pub parent_id: Option<i64>,
     pub subtask_count: usize,
+    pub due_date: Option<NaiveDate>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -44,6 +46,7 @@ pub enum TaskField {
     #[default]
     Title,
     Description,
+    DueDate,
     Subtasks,
 }
 
@@ -51,6 +54,7 @@ pub enum TaskField {
 pub struct TaskDraft {
     pub title: String,
     pub description: String,
+    pub due_date: String,
     pub focus: TaskField,
     pub subtasks: Vec<SubtaskDraft>,
     pub selected_subtask: usize,

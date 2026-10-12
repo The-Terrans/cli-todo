@@ -5,6 +5,66 @@ use ratatui::{backend::TestBackend, Terminal};
 use std::path::Path;
 
 #[test]
+fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
+    let today = parse_due_date("2026-08-15")?.unwrap();
+    let due = parse_due_date("2026-08-14")?;
+    let overdue = task_title_line("dated", false, 2, due, Style::default(), today);
+    assert_eq!(overdue.spans[0].content, "[ ] dated (2 subtasks)");
+    assert_eq!(overdue.spans[1].content, " [due: 2026-08-14]");
+    assert_eq!(overdue.spans[1].style.fg, Some(Color::LightRed));
+    let selected = task_title_line("dated", false, 0, due, selection_style(), today);
+    assert_eq!(selected.spans[1].style.fg, Some(Color::Red));
+    let completed = task_title_line("dated", true, 0, due, Style::default(), today);
+    assert_eq!(completed.spans[1].style.fg, Some(Color::DarkGray));
+    let due_today = task_title_line("dated", false, 0, Some(today), Style::default(), today);
+    assert_eq!(due_today.spans[1].style.fg, Some(Color::Gray));
+    assert_eq!(
+        task_title_line("undated", false, 0, None, Style::default(), today)
+            .spans
+            .len(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn due_date_field_has_its_own_focus_cursor_and_validation_row() -> Result<()> {
+    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    app.mode = Mode::Edit(
+        None,
+        TaskDraft {
+            title: "dated".into(),
+            due_date: "2026-02-30".into(),
+            focus: TaskField::DueDate,
+            ..TaskDraft::default()
+        },
+    );
+    app.message = "Due date must be a valid YYYY-MM-DD date".into();
+    let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let cells = &terminal.backend().buffer().content;
+    let text: String = cells.iter().map(|cell| cell.symbol()).collect();
+    assert!(text.contains("2026-02-30▏"));
+    assert!(text.contains("YYYY-MM-DD; blank clears"));
+    assert!(text.contains(&app.message));
+    assert_eq!(
+        cells
+            .iter()
+            .filter(|cell| cell.symbol().contains('▏'))
+            .count(),
+        1
+    );
+    let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
+    assert_eq!(corners.len(), 4);
+    assert_eq!(corners[2].fg, Color::LightYellow);
+    assert!(corners
+        .iter()
+        .enumerate()
+        .all(|(i, cell)| i == 2 || cell.fg == Color::DarkGray));
+    Ok(())
+}
+
+#[test]
 fn titles_show_direct_subtask_counts_in_lists_and_editors() -> Result<()> {
     use crate::types::SubtaskDraft;
     let db = db::open(Path::new(":memory:"))?;
@@ -118,10 +178,11 @@ fn subtasks_are_managed_in_the_editor_with_one_focused_cursor() -> Result<()> {
         0
     );
     let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
-    assert_eq!(corners.len(), 3);
+    assert_eq!(corners.len(), 4);
     assert_eq!(corners[0].fg, Color::DarkGray);
     assert_eq!(corners[1].fg, Color::DarkGray);
-    assert_eq!(corners[2].fg, Color::LightYellow);
+    assert_eq!(corners[2].fg, Color::DarkGray);
+    assert_eq!(corners[3].fg, Color::LightYellow);
     Ok(())
 }
 
@@ -191,12 +252,12 @@ fn task_editor_height_scales_and_stays_centered_within_the_terminal() {
     for height in [1, 8, 14, 20, 30, 50] {
         let terminal = Rect::new(7, 3, 100, height);
         let dialog = task_editor_area(terminal);
-        let expected = (height * 70 / 100).max(12).min(height.saturating_sub(2));
+        let expected = (height * 70 / 100).max(15).min(height.saturating_sub(2));
         assert_eq!(dialog.height, expected);
         assert_eq!(dialog.y, terminal.y + (height - expected) / 2);
         assert!(dialog.bottom() <= terminal.bottom());
-        if height >= 14 {
-            assert!(dialog.height >= 12);
+        if height >= 17 {
+            assert!(dialog.height >= 15);
         }
     }
     let mut app = App::new(db::open(Path::new(":memory:")).unwrap()).unwrap();
@@ -255,8 +316,9 @@ fn task_editor_shows_only_the_focused_fields_footer_and_cursor() -> Result<()> {
         );
         assert!(text.contains(if focused { "LAST▏" } else { "task▏" }));
         let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
-        assert_eq!(corners.len(), 3);
+        assert_eq!(corners.len(), 4);
         assert_eq!(corners[2].fg, Color::DarkGray);
+        assert_eq!(corners[3].fg, Color::DarkGray);
         assert_eq!(
             corners[0].fg,
             if focused {

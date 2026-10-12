@@ -1,5 +1,6 @@
 use crate::{
     constants::{ACTIONS, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH},
+    dates::parse_due_date,
     db,
     types::{
         Action, App, EditorFrame, Filter, History, Mode, SubtaskDraft, SyncResult, TaskDraft,
@@ -770,7 +771,8 @@ impl App {
             KeyCode::Tab => {
                 draft.focus = match draft.focus {
                     TaskField::Title => TaskField::Description,
-                    TaskField::Description => TaskField::Subtasks,
+                    TaskField::Description => TaskField::DueDate,
+                    TaskField::DueDate => TaskField::Subtasks,
                     TaskField::Subtasks => TaskField::Title,
                 }
             }
@@ -778,7 +780,8 @@ impl App {
                 draft.focus = match draft.focus {
                     TaskField::Title => TaskField::Subtasks,
                     TaskField::Description => TaskField::Title,
-                    TaskField::Subtasks => TaskField::Description,
+                    TaskField::Subtasks => TaskField::DueDate,
+                    TaskField::DueDate => TaskField::Description,
                 }
             }
             _ if draft.focus == TaskField::Subtasks => self.handle_subtasks_key(key),
@@ -787,6 +790,8 @@ impl App {
             KeyCode::Char(character) => {
                 if draft.focus == TaskField::Description {
                     draft.description.push(character);
+                } else if draft.focus == TaskField::DueDate {
+                    draft.due_date.push(character);
                 } else {
                     draft.title.push(character);
                 }
@@ -794,6 +799,8 @@ impl App {
             KeyCode::Backspace => {
                 if draft.focus == TaskField::Description {
                     draft.description.pop();
+                } else if draft.focus == TaskField::DueDate {
+                    draft.due_date.pop();
                 } else {
                     draft.title.pop();
                 }
@@ -910,6 +917,12 @@ impl App {
         if draft.title.trim().is_empty() {
             draft.focus = TaskField::Title;
             self.message = "Title cannot be empty".into();
+            self.mode = Mode::Edit(id, draft);
+            return Ok(());
+        }
+        if let Err(error) = parse_due_date(&draft.due_date) {
+            draft.focus = TaskField::DueDate;
+            self.message = error.to_string();
             self.mode = Mode::Edit(id, draft);
             return Ok(());
         }

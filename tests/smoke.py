@@ -199,20 +199,24 @@ with tempfile.TemporaryDirectory() as data:
         proc, master, slave, before = launch()
         screen()
         assert rows() == []
-        send(b"aparent\t\ta")
-        send(b"child\t\ta")
+        send(b"aparent\t\t\ta")
+        send(b"child\t\t\ta")
         send(b"grandchild\r\x13")
         assert rows() == [], "nested drafts must not persist before saving the root"
-        send(b"\x13")
+        output = send(b"\x1b[Z2026-02-30\r")
+        assert b"YYYY-MM-DD date" in output
+        assert rows() == [], "invalid due dates must not save the draft"
+        send(b"\x7f" * 10 + b"2000-01-01\x13")
         assert rows() == [("parent", 0), ("child", 0), ("grandchild", 0)]
         with sqlite3.connect(dbpath) as db:
             parents = db.execute("SELECT t.title,p.title FROM tasks t LEFT JOIN tasks p ON t.parent_id=p.id ORDER BY t.id").fetchall()
             assert parents == [("parent", None), ("child", "parent"), ("grandchild", "child")]
+            assert db.execute("SELECT due_date FROM tasks ORDER BY id").fetchall() == [("2000-01-01",), (None,), (None,)]
         send(b"0 ")
         assert rows() == [("parent", 1), ("child", 1), ("grandchild", 1)]
         send(b" ")
         assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
-        assert b"Delete subtask AND its descendants?" in send(b"e\t\td")
+        assert b"Delete subtask AND its descendants?" in send(b"e\t\t\td")
         send(b"ynq")
         assert len(rows()) == 3
         send(b"\x1bd\r")
@@ -231,11 +235,14 @@ with tempfile.TemporaryDirectory() as data:
         nested_snapshot.write_bytes(checkpoint.stdout)
         with sqlite3.connect(nested_snapshot) as db:
             assert db.execute("SELECT count(*) FROM tasks WHERE parent_id IS NOT NULL").fetchone()[0] == 2
+            assert db.execute("SELECT due_date FROM tasks WHERE parent_id IS NULL").fetchone()[0] == "2000-01-01"
         send(b"q")
         finish(0)
         proc, master, slave, before = launch()
         screen()
         assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT due_date FROM tasks WHERE parent_id IS NULL").fetchone()[0] == "2000-01-01"
         send(b"0d\r")
         assert rows() == [], "deleting a parent must delete its descendants"
         send(b"1apreserved\r")
@@ -245,7 +252,7 @@ with tempfile.TemporaryDirectory() as data:
         assert b"smoke forced error" in output
         finish(1)
         assert rows() == [("preserved", 0)]
-        print("PASS: PTY nested subtasks, descriptions/Tab/Ctrl+S, help, navigation, palette, projects, checkpoints, sync, nuke, persistence, terminal restoration")
+        print("PASS: PTY due dates, nested subtasks, descriptions/Tab/Ctrl+S, help, navigation, palette, projects, checkpoints, sync, nuke, persistence, terminal restoration")
     finally:
         if proc.poll() is None:
             proc.kill()

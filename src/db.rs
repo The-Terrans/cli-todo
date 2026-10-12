@@ -1,5 +1,6 @@
 use crate::{
     constants::MAX_SUBTASK_DEPTH,
+    dates::parse_due_date,
     types::{Filter, Project, SubtaskDraft, Task, TaskDraft},
     Result,
 };
@@ -33,6 +34,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     drop(columns);
     migrate_description(&db)?;
     migrate_subtasks(&db)?;
+    migrate_due_dates(&db)?;
     validate_hierarchy(&db)?;
     Ok(db)
 }
@@ -57,6 +59,22 @@ pub fn migrate_subtasks(db: &Connection) -> Result<()> {
         db.execute_batch("ALTER TABLE tasks ADD COLUMN parent_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE;")?;
     }
     db.execute_batch("CREATE INDEX IF NOT EXISTS tasks_parent_id ON tasks(parent_id);")?;
+    Ok(())
+}
+
+pub fn migrate_due_dates(db: &Connection) -> Result<()> {
+    if !has_column(db, "due_date")? {
+        db.execute_batch("ALTER TABLE tasks ADD COLUMN due_date TEXT;")?;
+    }
+    Ok(())
+}
+
+fn save_due_date(db: &Connection, id: i64, input: &str) -> Result<()> {
+    let date = parse_due_date(input)?.map(|date| date.to_string());
+    db.execute(
+        "UPDATE tasks SET due_date=?1 WHERE id=?2",
+        params![date, id],
+    )?;
     Ok(())
 }
 
@@ -132,6 +150,10 @@ fn draft_from_task(task: Task, children: &mut HashMap<i64, Vec<Task>>, depth: us
     TaskDraft {
         title: task.title,
         description: task.description,
+        due_date: task
+            .due_date
+            .map(|date| date.to_string())
+            .unwrap_or_default(),
         subtasks,
         depth,
         ..TaskDraft::default()
@@ -147,6 +169,7 @@ pub fn save_task_tree(
     let transaction = db.unchecked_transaction()?;
     save_task_details(&transaction, id, &draft.title, &draft.description, project)?;
     let id = id.unwrap_or_else(|| transaction.last_insert_rowid());
+    save_due_date(&transaction, id, &draft.due_date)?;
     let project =
         transaction.query_row("SELECT project_id FROM tasks WHERE id=?1", [id], |row| {
             row.get(0)
@@ -191,6 +214,7 @@ fn save_children(
             project,
         )?;
         let id = child.id.unwrap_or_else(|| db.last_insert_rowid());
+        save_due_date(db, id, &child.draft.due_date)?;
         db.execute(
             "UPDATE tasks SET parent_id=?1,done=?2 WHERE id=?3",
             params![parent, child.done, id],
@@ -272,10 +296,26 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
     } else {
         ("NULL", "0")
     };
+    let due_date = if has_column(db, "due_date")? {
+        "due_date"
+    } else {
+        "NULL"
+    };
     let mut statement = db.prepare(&format!(
-        "SELECT id,title,done,project_id,{description},{parent},{subtask_count} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY id"
+        "SELECT id,title,done,project_id,{description},{parent},{subtask_count},{due_date} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY id"
     ))?;
     let rows = statement.query_map([done], |row| {
+        let date: Option<String> = row.get(7)?;
+        let due_date = parse_due_date(date.as_deref().unwrap_or("")).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                7,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    error.to_string(),
+                )),
+            )
+        })?;
         Ok(Task {
             id: row.get(0)?,
             title: row.get(1)?,
@@ -284,6 +324,7 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
             project_id: row.get(3)?,
             parent_id: row.get(5)?,
             subtask_count: row.get(6)?,
+            due_date,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

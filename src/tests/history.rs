@@ -31,6 +31,7 @@ fn snapshots_preserve_subtasks_and_pull_rejects_cyclic_trees() -> Result<()> {
         draft: TaskDraft {
             title: "grandchild".into(),
             description: "deep\ndetails".into(),
+            due_date: "2000-01-01".into(),
             ..TaskDraft::default()
         },
     };
@@ -45,6 +46,7 @@ fn snapshots_preserve_subtasks_and_pull_rejects_cyclic_trees() -> Result<()> {
     };
     let draft = TaskDraft {
         title: "parent".into(),
+        due_date: "2028-02-29".into(),
         subtasks: vec![child],
         ..TaskDraft::default()
     };
@@ -60,6 +62,14 @@ fn snapshots_preserve_subtasks_and_pull_rejects_cyclic_trees() -> Result<()> {
         db::list_tasks(&first, Filter::All)?,
         db::list_tasks(&second, Filter::All)?
     );
+    assert_eq!(
+        db::list_tasks(&second, Filter::All)?[2].due_date,
+        crate::dates::parse_due_date("2000-01-01")?
+    );
+    let mut changed = db::task_draft(&first, 1)?;
+    changed.due_date = "2029-01-01".into();
+    db::save_task_tree(&first, Some(1), &changed, None)?;
+    assert!(a.has_changes(&first)?, "date-only edits must be dirty");
     db::toggle_task(&first, 1)?;
     assert!(a.has_changes(&first)?);
     a.commit(&first, "complete tree")?;
@@ -85,6 +95,22 @@ fn snapshots_preserve_subtasks_and_pull_rejects_cyclic_trees() -> Result<()> {
         .unwrap_err()
         .to_string()
         .contains("cycle"));
+    assert_eq!(db::list_tasks(&second, Filter::All)?, before);
+    assert_eq!(b.head()?, head);
+    assert_eq!(fs::read_dir(root.join("two/backups"))?.count(), backups);
+    first.execute_batch("UPDATE tasks SET parent_id=NULL,due_date='2026-02-30' WHERE id=1;")?;
+    a.snapshot_to(&first, &a.directory.join("tasks.sqlite3"))?;
+    a.git_text(&["add", "tasks.sqlite3"])?;
+    a.git_text(&["commit", "-m", "untrusted invalid date"])?;
+    a.push()?;
+    let SyncResult::Pull(plan) = b.fetch_pull()? else {
+        panic!("expected snapshot");
+    };
+    assert!(b
+        .apply_pull(&mut second, plan)
+        .unwrap_err()
+        .to_string()
+        .contains("YYYY-MM-DD"));
     assert_eq!(db::list_tasks(&second, Filter::All)?, before);
     assert_eq!(b.head()?, head);
     assert_eq!(fs::read_dir(root.join("two/backups"))?.count(), backups);
@@ -130,7 +156,7 @@ fn remote_sync_preserves_local_changes_and_fast_forwards_snapshots() -> Result<(
     configure_author(&a)?;
     db::save_project(&first, None, "Work")?;
     db::create_task(&first, "first", Some(first.last_insert_rowid()))?;
-    first.execute_batch("ALTER TABLE tasks DROP COLUMN description; DROP INDEX tasks_parent_id; ALTER TABLE tasks DROP COLUMN parent_id;")?;
+    first.execute_batch("ALTER TABLE tasks DROP COLUMN description; DROP INDEX tasks_parent_id; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN due_date;")?;
     a.commit(&first, "first checkpoint")?;
     a.push()?;
     b.set_remote(remote)?;
@@ -146,6 +172,7 @@ fn remote_sync_preserves_local_changes_and_fast_forwards_snapshots() -> Result<(
 
     db::migrate_description(&first)?;
     db::migrate_subtasks(&first)?;
+    db::migrate_due_dates(&first)?;
     db::save_task_details(
         &first,
         Some(1),
