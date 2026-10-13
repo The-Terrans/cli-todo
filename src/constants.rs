@@ -54,6 +54,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "SUBTASKS (IN THE RIGHT PANEL)",
     "  a             Add a child of the opened task",
     "  Left / Right  Cycle task details / subtask list",
+    "  Tab/Shift+Tab Also cycle task details / subtask list",
     "  Up / Down     Scroll details or select a focused child",
     "  Enter         Open selected child when Subtasks is focused",
     "  Enter / r     Reword when Details is focused; r works in either pane",
@@ -70,7 +71,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  PageUp/Down   Scroll one page",
     "  Home / End    Jump to first/last page",
     "  ? / Esc       Close help; return to the previous focus",
-    "  Tab/Shift+Tab Disabled while browsing; cycles popup fields",
+    "  Tab/Shift+Tab Cycles task panes/popup fields; disabled in main lists",
 ];
 
 pub(crate) const ACTIONS: [(&str, Action); 9] = [

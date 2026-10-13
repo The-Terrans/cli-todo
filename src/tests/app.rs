@@ -49,16 +49,22 @@ fn task_views_drill_down_add_children_edit_and_complete_without_popups() -> Resu
     assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Details);
     app.handle_key(KeyCode::Down)?;
     assert!(app.task_view.as_ref().unwrap().scroll > 0);
-    for key in [KeyCode::Tab, KeyCode::BackTab] {
+    for (key, expected) in [
+        (KeyCode::Tab, TaskPane::Subtasks),
+        (KeyCode::BackTab, TaskPane::Details),
+    ] {
         app.handle_key(key)?;
-        assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Details);
+        assert_eq!(app.task_view.as_ref().unwrap().focus, expected);
         assert!(matches!(app.mode, Mode::Browse));
     }
     app.handle_key(KeyCode::Right)?;
     assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Subtasks);
-    for key in [KeyCode::Tab, KeyCode::BackTab] {
+    for (key, expected) in [
+        (KeyCode::Tab, TaskPane::Details),
+        (KeyCode::BackTab, TaskPane::Subtasks),
+    ] {
         app.handle_key(key)?;
-        assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Subtasks);
+        assert_eq!(app.task_view.as_ref().unwrap().focus, expected);
         assert!(matches!(app.mode, Mode::Browse));
     }
     app.handle_key(KeyCode::Left)?;

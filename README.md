@@ -52,12 +52,12 @@ Navigation offers All, Pending, and Completed filters. Arrows apply the filter i
 
 ## Opened tasks
 
-Press **Enter** on a task to replace the right-hand list with its title, description, status, and due date—no popup. A second **Subtasks** section appears only when children exist.
+Press **Enter** on a task to replace the right-hand list with its title, description, status, and due date—no popup. A second **Subtasks** section appears only when children exist. Details uses one third of the right-panel height, with a 6-row minimum; Subtasks gets the rest. Small terminals shrink Details safely, retaining space for Subtasks. Without children, Details fills the panel. Within Details, the title (with completion checkbox) and date stay pinned at the top; a divider separates the scrollable Description below. This split does not change the overall detail height.
 
-1. Details are focused first. **Left/Right** cycles Details ↔ Subtasks when children exist, like the sidebar. Tab/Shift+Tab does nothing while browsing. In Subtasks, **Up/Down** selects a child and **Enter** opens its details.
+1. Details are focused first. **Left/Right** cycles Details ↔ Subtasks when children exist, like the sidebar. **Tab/Shift+Tab** also cycles these two panes. In Subtasks, **Up/Down** selects a child and **Enter** opens its details.
 2. **a** opens a creation form for a child of the opened task. Saving returns to the parent view; Esc cancels.
 3. **Enter** while Details is focused opens the same three-field reword popup as **r**. In Subtasks, Enter still opens the selected child's details. **x** toggles that task between completed and pending. Completing also completes every descendant; reopening leaves descendants unchanged.
-4. **PageUp/PageDown** scroll the details; **Home/End** jump. Up/Down scroll while Details is focused.
+4. **PageUp/PageDown** scroll Description; **Home/End** jump. Up/Down scroll Description while Details is focused. Title and date remain visible.
 5. **Esc** returns to the parent, then the main task list, then the sidebar. Space toggles the selected child in Subtasks, or the opened task in Details.
 
 ## Task descriptions
@@ -92,7 +92,7 @@ Only top-level tasks appear in Inbox/project lists; manage children in the right
 
 The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to create a project. Use arrows to select a project: its tasks preview immediately on the right. **Enter** focuses those tasks. The focused panel has a bold bright-yellow border and a black-on-yellow title, even when its list is empty. Only its row cursor is highlighted; inactive panels have dark-gray borders and no highlighted cursor. **e** renames it. Names must be nonblank and unique.
 
-New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** returns through any opened task ancestry to the main list, then to its navigation section. Tab/Shift+Tab remains disabled while browsing, including opened tasks. It still cycles fields inside task popups.
+New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** returns through any opened task ancestry to the main list, then to its navigation section. Tab/Shift+Tab cycles Details/Subtasks in opened tasks and fields inside task popups. It remains disabled in main lists.
 
 **Deleting a project permanently deletes all its tasks**, after explicit confirmation. Esc cancels. Existing databases migrate automatically, preserving old tasks in Inbox.
 

@@ -192,27 +192,32 @@ fn task_view_areas(area: Rect, children: bool) -> (Rect, Option<Rect>) {
     if !children {
         return (area, None);
     }
-    let rows = Layout::vertical([Constraint::Percentage(45), Constraint::Min(3)]).split(area);
+    let height = (area.height / 3).max(6).min(area.height.saturating_sub(3));
+    let rows = Layout::vertical([Constraint::Length(height), Constraint::Min(3)]).split(area);
     (rows[0], Some(rows[1]))
 }
 
-fn task_details_text(task: &Task) -> Text<'static> {
-    let mut lines = vec![
-        Line::styled(
-            format!("{}{}", task.title, subtask_count_label(task.subtask_count)),
-            Style::default()
-                .fg(Color::Reset)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Line::styled(
-            if task.done {
-                "Status: completed"
-            } else {
-                "Status: pending"
-            },
-            Style::default().fg(Color::Gray),
-        ),
-    ];
+fn task_detail_sections(inner: Rect) -> (Rect, Rect, Rect) {
+    let rows = Layout::vertical([
+        Constraint::Length(inner.height.min(2)),
+        Constraint::Length(u16::from(inner.height > 2)),
+        Constraint::Min(0),
+    ])
+    .split(inner);
+    (rows[0], rows[1], rows[2])
+}
+
+fn task_heading_text(task: &Task) -> Text<'static> {
+    let mut lines = vec![task_title_line(
+        &task.title,
+        task.done,
+        task.subtask_count,
+        None,
+        Style::default()
+            .fg(Color::Reset)
+            .add_modifier(Modifier::BOLD),
+        Local::now().date_naive(),
+    )];
     let overdue = task
         .due_date
         .is_some_and(|date| is_overdue(date, task.done, Local::now().date_naive()));
@@ -229,53 +234,69 @@ fn task_details_text(task: &Task) -> Text<'static> {
             Color::Gray
         }),
     ));
-    lines.push(Line::raw(""));
+    Text::from(lines)
+}
+
+fn task_description_text(task: &Task) -> Text<'static> {
     if task.description.is_empty() {
-        lines.push(Line::styled(
+        Text::from(Line::styled(
             "No description",
             Style::default().fg(Color::DarkGray),
-        ));
+        ))
     } else {
-        lines.extend(
+        Text::from(
             task.description
                 .lines()
-                .map(|line| Line::styled(line.to_owned(), Style::default().fg(Color::Gray))),
-        );
+                .map(|line| Line::styled(line.to_owned(), Style::default().fg(Color::Gray)))
+                .collect::<Vec<_>>(),
+        )
     }
-    Text::from(lines)
 }
 
 pub fn task_detail_scroll_bounds(view: &TaskView, viewport: Rect) -> (u16, u16) {
     let body = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(viewport)[0];
     let area = Layout::horizontal([Constraint::Percentage(25), Constraint::Min(0)]).split(body)[1];
     let (details, _) = task_view_areas(area, !view.children.is_empty());
-    let inner = panel("", false).inner(details);
-    let lines = Paragraph::new(task_details_text(&view.task))
+    let (_, _, description) = task_detail_sections(panel("", false).inner(details));
+    if description.height == 0 {
+        return (0, 1);
+    }
+    let lines = Paragraph::new(task_description_text(&view.task))
         .wrap(Wrap { trim: false })
-        .line_count(inner.width);
+        .line_count(description.width);
     (
         lines
-            .saturating_sub(inner.height as usize)
+            .saturating_sub(description.height as usize)
             .min(u16::MAX as usize) as u16,
-        inner.height.max(1),
+        description.height.max(1),
     )
 }
 
 fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
     let focused = matches!(app.mode, Mode::Browse) && !app.navigation_focused;
     let (details, children) = task_view_areas(area, !view.children.is_empty());
+    let details_focused = focused && view.focus == TaskPane::Details;
+    let block = panel("─[0]─Task details", details_focused).border_type(BorderType::Rounded);
+    let (heading, divider, description) = task_detail_sections(block.inner(details));
+    frame.render_widget(block, details);
+    frame.render_widget(Paragraph::new(task_heading_text(&view.task)), heading);
     frame.render_widget(
-        Paragraph::new(task_details_text(&view.task))
+        Paragraph::new(format!(
+            "─ Description {}",
+            "─".repeat(divider.width.saturating_sub(14) as usize)
+        ))
+        .style(Style::default().fg(if details_focused {
+            Color::LightYellow
+        } else {
+            Color::DarkGray
+        })),
+        divider,
+    );
+    frame.render_widget(
+        Paragraph::new(task_description_text(&view.task))
             .wrap(Wrap { trim: false })
-            .scroll((view.scroll, 0))
-            .block(
-                panel(
-                    "─[0]─Task details",
-                    focused && view.focus == TaskPane::Details,
-                )
-                .border_type(BorderType::Rounded),
-            ),
-        details,
+            .scroll((view.scroll, 0)),
+        description,
     );
     if let Some(area) = children {
         let focused = focused && view.focus == TaskPane::Subtasks;

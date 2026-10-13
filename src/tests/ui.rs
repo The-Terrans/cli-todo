@@ -5,6 +5,80 @@ use ratatui::{backend::TestBackend, Terminal};
 use std::path::Path;
 
 #[test]
+fn task_details_use_one_third_with_a_six_row_minimum_and_fit_small_terminals() {
+    for height in 0..=90 {
+        let area = Rect::new(2, 3, 80, height);
+        let (details, children) = task_view_areas(area, true);
+        let children = children.unwrap();
+        let expected = (height / 3).max(6).min(height.saturating_sub(3));
+        assert_eq!(details.height, expected);
+        assert_eq!(children.height, height - expected);
+        assert_eq!(details.x, area.x);
+        assert_eq!(details.y, area.y);
+        assert_eq!(details.width, area.width);
+        assert_eq!(children.y, details.bottom());
+        assert_eq!(children.bottom(), area.bottom());
+        assert_eq!(task_view_areas(area, false), (area, None));
+        let inner = panel("", false).inner(details);
+        let (heading, divider, description) = task_detail_sections(inner);
+        assert_eq!(heading.height, inner.height.min(2));
+        assert_eq!(divider.height, u16::from(inner.height > 2));
+        assert_eq!(divider.y, heading.bottom());
+        assert_eq!(description.y, divider.bottom());
+        assert_eq!(description.bottom(), inner.bottom());
+        if details.height >= 6 {
+            assert!(description.height >= 1);
+        }
+    }
+}
+
+#[test]
+fn task_detail_heading_stays_visible_while_description_scrolls() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    db::save_task_tree(
+        &db,
+        None,
+        &TaskDraft {
+            title: "pinned title".into(),
+            due_date: "2000-01-01".into(),
+            description: "first line\n".repeat(30) + "last description line",
+            subtasks: vec![crate::types::SubtaskDraft {
+                id: None,
+                done: false,
+                draft: TaskDraft {
+                    title: "child".into(),
+                    ..TaskDraft::default()
+                },
+            }],
+            ..TaskDraft::default()
+        },
+        None,
+    )?;
+    let mut app = App::new(db)?;
+    app.viewport.width = 100;
+    app.resize(25);
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE))?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))?;
+    app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::NONE))?;
+    assert!(app.task_view.as_ref().unwrap().scroll > 0);
+    let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("[ ] pinned title"));
+    assert!(text.contains("Due: 2000-01-01"));
+    assert!(text.contains("─ Description"));
+    assert!(text.contains("last description line"));
+    assert!(!text.contains("Status:"));
+    Ok(())
+}
+
+#[test]
 fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
     let db = db::open(Path::new(":memory:"))?;
     db::save_task_tree(
@@ -571,7 +645,7 @@ fn footer_is_compact_and_help_is_readable_in_a_short_terminal() -> Result<()> {
         .iter()
         .map(|cell| cell.symbol())
         .collect();
-    assert!(text.contains("Tab") && text.contains("Disabled"));
+    assert!(text.contains("Tab") && text.contains("Cycles"));
     app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))?;
     terminal.draw(|frame| draw(frame, &app))?;
     let text: String = terminal
