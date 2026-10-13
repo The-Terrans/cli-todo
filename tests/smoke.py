@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory() as data:
         assert rows() == [("first", 0)]
         send(b"aabandoned\x1b")
         assert len(rows()) == 1
-        send(b"\r\r!\tdescription first\rsecond line\x13")
+        send(b"\rr!\tdescription first\rsecond line\x13")
         assert rows() == [("first!", 0)]
         assert descriptions() == [("description first\nsecond line",)]
         send(b" ")
@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory() as data:
         send(b"\x0bpending\r")
         assert b"Task:" in send(b"\x0bpalette task")
         send(b"\r")
-        send(b"\x0bedit\r!\r")
+        send(b"\x0breword\r!\r")
         assert rows() == [("palette task!", 0)]
         send(b"\x0breopen\r")
         assert rows() == [("palette task!", 1)]
@@ -125,7 +125,7 @@ with tempfile.TemporaryDirectory() as data:
         send(b"d\r")
         assert rows() == []
         send(b"1apreserved\r")
-        send(b"\re\tbackup description\x13")
+        send(b"\rr\tbackup description\x13")
         assert descriptions() == [("backup description",)]
         assert b"No todo commits" in send(b"3")
         assert b"Commit message cannot be empty" in send(b"c\r")
@@ -199,30 +199,46 @@ with tempfile.TemporaryDirectory() as data:
         proc, master, slave, before = launch()
         screen()
         assert rows() == []
-        send(b"aparent\t\t\ta")
-        send(b"child\t\t\ta")
-        send(b"grandchild\r\x13")
-        assert rows() == [], "nested drafts must not persist before saving the root"
-        output = send(b"\x1b[Z2026-02-30\r")
+        output = send(b"aparent\t\t2026-02-30\r")
         assert b"YYYY-MM-DD date" in output
         assert rows() == [], "invalid due dates must not save the draft"
         send(b"\x7f" * 10 + b"2000-01-01\x13")
+        assert rows() == [("parent", 0)]
+        send(b"0\r")
+        send(b"\r!")
+        send(b"\x1b")
+        assert rows() == [("parent", 0)], "Enter in details must open a cancellable reword popup"
+        send(b"achild\r")
+        send(b"\x1b[C\ragrandchild\r")
         assert rows() == [("parent", 0), ("child", 0), ("grandchild", 0)]
         with sqlite3.connect(dbpath) as db:
             parents = db.execute("SELECT t.title,p.title FROM tasks t LEFT JOIN tasks p ON t.parent_id=p.id ORDER BY t.id").fetchall()
             assert parents == [("parent", None), ("child", "parent"), ("grandchild", "child")]
             assert db.execute("SELECT due_date FROM tasks ORDER BY id").fetchall() == [("2000-01-01",), (None,), (None,)]
-        send(b"0 ")
+        send(b"\x1b")
+        send(b"x")
         assert rows() == [("parent", 1), ("child", 1), ("grandchild", 1)]
+        send(b"x")
+        assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
+        send(b"x\r\x1b[C\r")
+        assert rows() == [("parent", 1), ("child", 1), ("grandchild", 1)]
+        for _ in range(3):
+            send(b"\x1b")
         send(b" ")
         assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
-        assert b"Delete subtask AND its descendants?" in send(b"e\t\t\td")
+        send(b"r!")
+        send(b"\x1b")
+        assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
+        send(b"r\tparent details\x13")
+        assert descriptions()[0] == ("parent details",)
+        assert b"Delete task AND its subtasks?" in send(b"\r\x1b[C\rd")
         send(b"ynq")
         assert len(rows()) == 3
-        send(b"\x1bd\r")
-        assert len(rows()) == 3, "subtask deletion must remain staged"
         send(b"\x1b")
-        assert len(rows()) == 3, "Esc at the root must cancel staged deletion"
+        send(b"r!")
+        send(b"\x1b")
+        assert rows()[1] == ("child", 1), "Esc must cancel subtask rewording"
+        send(b"\x1b")
         send(b"cnested snapshot\r")
         deadline = time.monotonic() + 5
         while True:

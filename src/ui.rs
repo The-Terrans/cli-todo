@@ -1,13 +1,13 @@
 use crate::{
     constants::{FILTERS, KEYBINDINGS},
-    dates::{is_overdue, parse_due_date},
-    types::{App, Mode, TaskDraft, TaskField},
+    dates::is_overdue,
+    types::{App, Mode, Task, TaskDraft, TaskField, TaskPane, TaskView},
 };
 use chrono::{Local, NaiveDate};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{
         Block, BorderType, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph,
         Wrap,
@@ -34,6 +34,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_commits(frame, sections[2], app);
     if app.commits_focused {
         draw_commit_details(frame, panels[2], app);
+    } else if let Some(view) = &app.task_view {
+        draw_task_view(frame, panels[2], app, view);
     } else {
         draw_tasks(frame, panels[2], app);
     }
@@ -186,6 +188,127 @@ fn draw_commit_details(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
+fn task_view_areas(area: Rect, children: bool) -> (Rect, Option<Rect>) {
+    if !children {
+        return (area, None);
+    }
+    let rows = Layout::vertical([Constraint::Percentage(45), Constraint::Min(3)]).split(area);
+    (rows[0], Some(rows[1]))
+}
+
+fn task_details_text(task: &Task) -> Text<'static> {
+    let mut lines = vec![
+        Line::styled(
+            format!("{}{}", task.title, subtask_count_label(task.subtask_count)),
+            Style::default()
+                .fg(Color::Reset)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::styled(
+            if task.done {
+                "Status: completed"
+            } else {
+                "Status: pending"
+            },
+            Style::default().fg(Color::Gray),
+        ),
+    ];
+    let overdue = task
+        .due_date
+        .is_some_and(|date| is_overdue(date, task.done, Local::now().date_naive()));
+    lines.push(Line::styled(
+        format!(
+            "Due: {}",
+            task.due_date
+                .map(|date| date.to_string())
+                .unwrap_or_else(|| "none".into())
+        ),
+        Style::default().fg(if overdue {
+            Color::LightRed
+        } else {
+            Color::Gray
+        }),
+    ));
+    lines.push(Line::raw(""));
+    if task.description.is_empty() {
+        lines.push(Line::styled(
+            "No description",
+            Style::default().fg(Color::DarkGray),
+        ));
+    } else {
+        lines.extend(
+            task.description
+                .lines()
+                .map(|line| Line::styled(line.to_owned(), Style::default().fg(Color::Gray))),
+        );
+    }
+    Text::from(lines)
+}
+
+pub fn task_detail_scroll_bounds(view: &TaskView, viewport: Rect) -> (u16, u16) {
+    let body = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(viewport)[0];
+    let area = Layout::horizontal([Constraint::Percentage(25), Constraint::Min(0)]).split(body)[1];
+    let (details, _) = task_view_areas(area, !view.children.is_empty());
+    let inner = panel("", false).inner(details);
+    let lines = Paragraph::new(task_details_text(&view.task))
+        .wrap(Wrap { trim: false })
+        .line_count(inner.width);
+    (
+        lines
+            .saturating_sub(inner.height as usize)
+            .min(u16::MAX as usize) as u16,
+        inner.height.max(1),
+    )
+}
+
+fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
+    let focused = matches!(app.mode, Mode::Browse) && !app.navigation_focused;
+    let (details, children) = task_view_areas(area, !view.children.is_empty());
+    frame.render_widget(
+        Paragraph::new(task_details_text(&view.task))
+            .wrap(Wrap { trim: false })
+            .scroll((view.scroll, 0))
+            .block(
+                panel(
+                    "─[0]─Task details",
+                    focused && view.focus == TaskPane::Details,
+                )
+                .border_type(BorderType::Rounded),
+            ),
+        details,
+    );
+    if let Some(area) = children {
+        let focused = focused && view.focus == TaskPane::Subtasks;
+        let today = Local::now().date_naive();
+        let items = view.children.iter().enumerate().map(|(index, child)| {
+            let style = if focused && index == view.selected_child {
+                selection_style()
+            } else {
+                Style::default().fg(Color::Reset)
+            };
+            ListItem::new(task_title_line(
+                &child.title,
+                child.done,
+                child.subtask_count,
+                child.due_date,
+                style,
+                today,
+            ))
+        });
+        let mut state = ListState::default().with_selected(focused.then_some(view.selected_child));
+        frame.render_stateful_widget(
+            List::new(items)
+                .block(panel(" Subtasks ", focused).border_type(BorderType::Rounded))
+                .style(Style::default().fg(Color::Black))
+                .highlight_spacing(HighlightSpacing::Always)
+                .highlight_style(Style::default().bg(Color::LightYellow))
+                .highlight_symbol("> "),
+            area,
+            &mut state,
+        );
+    }
+}
+
 fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
     let active = matches!(app.mode, Mode::Browse) && !app.navigation_focused;
     let today = Local::now().date_naive();
@@ -320,13 +443,13 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
                 id.is_some(),
                 draft,
                 &app.message,
-                !app.editor_stack.is_empty(),
+                app.new_task_parent.is_some()
+                    || app
+                        .task_view
+                        .as_ref()
+                        .is_some_and(|view| view.task.parent_id.is_some()),
             )
         }
-        Mode::SubtaskDelete(..) => (
-            " Delete subtask AND its descendants? ",
-            "Remove this subtask tree from the draft?\nEnter: confirm · Esc: cancel".into(),
-        ),
         Mode::Delete(_) => (
             " Delete task AND its subtasks? ",
             "Permanently delete this task and its descendants?\nEnter: confirm · Esc: cancel"
@@ -361,7 +484,6 @@ fn draw_task_editor(
         } else {
             3
         }),
-        Constraint::Fill(1),
     ])
     .split(area);
     let hint = Style::default()
@@ -370,9 +492,9 @@ fn draw_task_editor(
         .remove_modifier(Modifier::BOLD);
     let mut title = panel(
         match (editing, subtask) {
-            (true, true) => " Edit subtask: Title ",
+            (true, true) => " Reword subtask: Title ",
             (false, true) => " Add subtask: Title ",
-            (true, false) => " Edit task: Title ",
+            (true, false) => " Reword task: Title ",
             (false, false) => " Add task: Title ",
         },
         title_focused,
@@ -451,7 +573,6 @@ fn draw_task_editor(
         draft,
         if due_focused { message } else { "" },
     );
-    draw_subtasks(frame, rows[3], draft);
 }
 
 fn draw_due_date(frame: &mut Frame, area: Rect, draft: &TaskDraft, message: &str) {
@@ -545,61 +666,6 @@ fn subtask_count_label(count: usize) -> String {
         0 => String::new(),
         1 => " (1 subtask)".into(),
         _ => format!(" ({count} subtasks)"),
-    }
-}
-
-fn draw_subtasks(frame: &mut Frame, area: Rect, draft: &TaskDraft) {
-    let focused = draft.focus == TaskField::Subtasks;
-    let hint = Style::default()
-        .fg(Color::LightYellow)
-        .bg(Color::Reset)
-        .remove_modifier(Modifier::BOLD);
-    let mut block = panel(" Subtasks ", focused);
-    if focused {
-        block = block
-            .title(Line::styled(" Space: complete/reopen ", hint).alignment(Alignment::Right))
-            .title_bottom(
-                Line::styled(
-                    " a:add · Enter:edit · d:delete · <c-s>:save · Esc:cancel ",
-                    hint,
-                )
-                .alignment(Alignment::Right),
-            );
-    }
-    let inner = block.inner(area);
-    let today = Local::now().date_naive();
-    let items = draft.subtasks.iter().enumerate().map(|(index, child)| {
-        let style = if focused && index == draft.selected_subtask {
-            selection_style()
-        } else {
-            Style::default().fg(Color::Reset)
-        };
-        ListItem::new(task_title_line(
-            &child.draft.title,
-            child.done,
-            child.draft.subtasks.len(),
-            parse_due_date(&child.draft.due_date).ok().flatten(),
-            style,
-            today,
-        ))
-    });
-    let mut state = ListState::default()
-        .with_selected((focused && !draft.subtasks.is_empty()).then_some(draft.selected_subtask));
-    frame.render_stateful_widget(
-        List::new(items)
-            .block(block)
-            .style(Style::default().fg(Color::Black))
-            .highlight_spacing(HighlightSpacing::Always)
-            .highlight_style(Style::default().bg(Color::LightYellow))
-            .highlight_symbol("> "),
-        area,
-        &mut state,
-    );
-    if draft.subtasks.is_empty() {
-        frame.render_widget(
-            Paragraph::new("a: add a subtask").style(Style::default().fg(Color::Reset)),
-            inner,
-        );
     }
 }
 

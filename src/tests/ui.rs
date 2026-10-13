@@ -1,8 +1,94 @@
 use super::*;
-use crate::{db, Result};
+use crate::{dates::parse_due_date, db, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
 use std::path::Path;
+
+#[test]
+fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    db::save_task_tree(
+        &db,
+        None,
+        &TaskDraft {
+            title: "parent".into(),
+            description: "inline description".into(),
+            due_date: "2000-01-01".into(),
+            subtasks: vec![crate::types::SubtaskDraft {
+                id: None,
+                done: false,
+                draft: TaskDraft {
+                    title: "child".into(),
+                    ..TaskDraft::default()
+                },
+            }],
+            ..TaskDraft::default()
+        },
+        None,
+    )?;
+    let mut app = App::new(db)?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE))?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))?;
+    let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let cells = &terminal.backend().buffer().content;
+    let text: String = cells.iter().map(|cell| cell.symbol()).collect();
+    assert!(text.contains("Task details"));
+    assert!(text.contains("inline description"));
+    assert!(text.contains("Due: 2000-01-01"));
+    assert!(text.contains("Subtasks"));
+    assert!(text.contains("[ ] child"));
+    assert!(!text.contains("Reword task: Title"));
+    assert_eq!(
+        cells.iter().filter(|cell| cell.symbol() == "┌").count(),
+        0,
+        "no editor popup"
+    );
+    assert_eq!(
+        cells
+            .iter()
+            .filter(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
+            .count(),
+        0
+    );
+    let corners: Vec<_> = cells
+        .iter()
+        .enumerate()
+        .filter(|(index, cell)| index % 100 >= 25 && cell.symbol() == "╭")
+        .map(|(_, cell)| cell.fg)
+        .collect();
+    assert_eq!(corners, vec![Color::LightYellow, Color::DarkGray]);
+    app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let cells = &terminal.backend().buffer().content;
+    assert_eq!(
+        cells
+            .iter()
+            .filter(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
+            .count(),
+        1
+    );
+    let corners: Vec<_> = cells
+        .iter()
+        .enumerate()
+        .filter(|(index, cell)| index % 100 >= 25 && cell.symbol() == "╭")
+        .map(|(_, cell)| cell.fg)
+        .collect();
+    assert_eq!(corners, vec![Color::DarkGray, Color::LightYellow]);
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("Task details") && text.contains("child"));
+    assert!(!text.contains("Subtasks"), "hide empty subtask section");
+    assert!(matches!(app.mode, Mode::Browse));
+    Ok(())
+}
 
 #[test]
 fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
@@ -55,7 +141,7 @@ fn due_date_field_has_its_own_focus_cursor_and_validation_row() -> Result<()> {
         1
     );
     let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
-    assert_eq!(corners.len(), 4);
+    assert_eq!(corners.len(), 3);
     assert_eq!(corners[2].fg, Color::LightYellow);
     assert!(corners
         .iter()
@@ -65,7 +151,7 @@ fn due_date_field_has_its_own_focus_cursor_and_validation_row() -> Result<()> {
 }
 
 #[test]
-fn titles_show_direct_subtask_counts_in_lists_and_editors() -> Result<()> {
+fn titles_show_direct_subtask_counts_in_lists_and_opened_views() -> Result<()> {
     use crate::types::SubtaskDraft;
     let db = db::open(Path::new(":memory:"))?;
     let leaf = SubtaskDraft {
@@ -119,7 +205,7 @@ fn titles_show_direct_subtask_counts_in_lists_and_editors() -> Result<()> {
     assert!(text.contains("parent (2 subtasks)"));
     assert!(!text.contains("solo ("));
     app.handle_key_event(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE))?;
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))?;
     terminal.draw(|frame| draw(frame, &app))?;
     let text: String = terminal
         .backend()
@@ -136,53 +222,63 @@ fn titles_show_direct_subtask_counts_in_lists_and_editors() -> Result<()> {
 }
 
 #[test]
-fn subtasks_are_managed_in_the_editor_with_one_focused_cursor() -> Result<()> {
+fn creation_and_reword_popups_have_only_three_fields_and_one_cursor() -> Result<()> {
     let mut app = App::new(db::open(Path::new(":memory:"))?)?;
-    app.mode = Mode::Edit(
-        None,
-        TaskDraft {
-            title: "parent".into(),
-            focus: TaskField::Subtasks,
-            subtasks: vec![crate::types::SubtaskDraft {
-                id: None,
-                done: false,
-                draft: TaskDraft {
-                    title: "child".into(),
+    let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
+    for id in [None, Some(1)] {
+        for (index, focus) in [TaskField::Title, TaskField::Description, TaskField::DueDate]
+            .into_iter()
+            .enumerate()
+        {
+            app.mode = Mode::Edit(
+                id,
+                TaskDraft {
+                    title: "parent".into(),
+                    focus,
+                    subtasks: vec![crate::types::SubtaskDraft {
+                        id: None,
+                        done: false,
+                        draft: TaskDraft {
+                            title: "child".into(),
+                            ..TaskDraft::default()
+                        },
+                    }],
                     ..TaskDraft::default()
                 },
-            }],
-            ..TaskDraft::default()
-        },
-    );
-    let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
-    terminal.draw(|frame| draw(frame, &app))?;
-    let cells = &terminal.backend().buffer().content;
-    let text: String = cells.iter().map(|cell| cell.symbol()).collect();
-    assert!(text.contains("Subtasks"));
-    assert!(text.contains("[ ] child"));
-    assert!(text.contains("Enter:edit"));
-    assert!(text.contains("<c-s>:save"));
-    assert!(text.contains("Esc:cancel"));
-    assert_eq!(
-        cells
-            .iter()
-            .filter(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
-            .count(),
-        1
-    );
-    assert_eq!(
-        cells
-            .iter()
-            .filter(|cell| cell.symbol().contains('▏'))
-            .count(),
-        0
-    );
-    let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
-    assert_eq!(corners.len(), 4);
-    assert_eq!(corners[0].fg, Color::DarkGray);
-    assert_eq!(corners[1].fg, Color::DarkGray);
-    assert_eq!(corners[2].fg, Color::DarkGray);
-    assert_eq!(corners[3].fg, Color::LightYellow);
+            );
+            terminal.draw(|frame| draw(frame, &app))?;
+            let cells = &terminal.backend().buffer().content;
+            let text: String = cells.iter().map(|cell| cell.symbol()).collect();
+            assert!(text.contains(if id.is_some() {
+                "Reword task: Title"
+            } else {
+                "Add task: Title"
+            }));
+            assert!(text.contains("Description"));
+            assert!(text.contains("Due date"));
+            assert!(!text.contains("Subtasks"));
+            assert!(!text.contains("[ ] child"));
+            assert_eq!(
+                cells
+                    .iter()
+                    .filter(|cell| cell.symbol().contains('▏'))
+                    .count(),
+                1
+            );
+            let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
+            assert_eq!(corners.len(), 3);
+            for (field, corner) in corners.iter().enumerate() {
+                assert_eq!(
+                    corner.fg,
+                    if field == index {
+                        Color::LightYellow
+                    } else {
+                        Color::DarkGray
+                    }
+                );
+            }
+        }
+    }
     Ok(())
 }
 
@@ -316,9 +412,8 @@ fn task_editor_shows_only_the_focused_fields_footer_and_cursor() -> Result<()> {
         );
         assert!(text.contains(if focused { "LAST▏" } else { "task▏" }));
         let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
-        assert_eq!(corners.len(), 4);
+        assert_eq!(corners.len(), 3);
         assert_eq!(corners[2].fg, Color::DarkGray);
-        assert_eq!(corners[3].fg, Color::DarkGray);
         assert_eq!(
             corners[0].fg,
             if focused {

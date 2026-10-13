@@ -160,15 +160,54 @@ fn draft_from_task(task: Task, children: &mut HashMap<i64, Vec<Task>>, depth: us
     }
 }
 
+pub fn reword_task(db: &Connection, id: i64, draft: &TaskDraft) -> Result<()> {
+    let transaction = db.unchecked_transaction()?;
+    save_task_details(
+        &transaction,
+        Some(id),
+        &draft.title,
+        &draft.description,
+        None,
+    )?;
+    save_due_date(&transaction, id, &draft.due_date)?;
+    transaction.commit()?;
+    Ok(())
+}
+
 pub fn save_task_tree(
     db: &Connection,
     id: Option<i64>,
     draft: &TaskDraft,
     project: Option<i64>,
 ) -> Result<()> {
+    save_tree(db, id, draft, project, None)
+}
+
+pub fn save_subtask_tree(db: &Connection, parent: i64, draft: &TaskDraft) -> Result<()> {
+    let project = db.query_row(
+        "SELECT project_id FROM tasks WHERE id=?1",
+        [parent],
+        |row| row.get(0),
+    )?;
+    save_tree(db, None, draft, project, Some(parent))
+}
+
+fn save_tree(
+    db: &Connection,
+    id: Option<i64>,
+    draft: &TaskDraft,
+    project: Option<i64>,
+    parent: Option<i64>,
+) -> Result<()> {
     let transaction = db.unchecked_transaction()?;
     save_task_details(&transaction, id, &draft.title, &draft.description, project)?;
     let id = id.unwrap_or_else(|| transaction.last_insert_rowid());
+    if let Some(parent) = parent {
+        transaction.execute(
+            "UPDATE tasks SET parent_id=?1 WHERE id=?2",
+            params![parent, id],
+        )?;
+    }
     save_due_date(&transaction, id, &draft.due_date)?;
     let project =
         transaction.query_row("SELECT project_id FROM tasks WHERE id=?1", [id], |row| {
@@ -339,14 +378,19 @@ pub fn toggle_task(db: &Connection, id: i64) -> Result<()> {
     let transaction = db.unchecked_transaction()?;
     let done: bool =
         transaction.query_row("SELECT done FROM tasks WHERE id=?1", [id], |row| row.get(0))?;
-    transaction.execute(
+    set_task_done(&transaction, id, !done)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn set_task_done(db: &Connection, id: i64, done: bool) -> Result<()> {
+    db.execute(
         "WITH RECURSIVE descendants(id) AS (
             SELECT id FROM tasks WHERE id=?1
             UNION SELECT tasks.id FROM tasks JOIN descendants ON tasks.parent_id=descendants.id
         ) UPDATE tasks SET done=?2 WHERE id=?1 OR (?2 AND id IN descendants)",
-        params![id, !done],
+        params![id, done],
     )?;
-    transaction.commit()?;
     Ok(())
 }
 

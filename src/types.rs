@@ -1,10 +1,11 @@
 use chrono::NaiveDate;
+use ratatui::layout::Rect;
 use rusqlite::Connection;
 use std::{error::Error, path::PathBuf, sync::mpsc::Receiver};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Task {
     pub id: i64,
     pub title: String,
@@ -47,7 +48,6 @@ pub enum TaskField {
     Title,
     Description,
     DueDate,
-    Subtasks,
 }
 
 #[derive(Clone, Default)]
@@ -57,7 +57,6 @@ pub struct TaskDraft {
     pub due_date: String,
     pub focus: TaskField,
     pub subtasks: Vec<SubtaskDraft>,
-    pub selected_subtask: usize,
     pub depth: usize,
 }
 
@@ -68,19 +67,12 @@ pub struct SubtaskDraft {
     pub draft: TaskDraft,
 }
 
-pub struct EditorFrame {
-    pub id: Option<i64>,
-    pub draft: TaskDraft,
-    pub adding: bool,
-}
-
 pub enum Mode {
     Browse,
     Help {
         scroll: u16,
     },
     Edit(Option<i64>, TaskDraft),
-    SubtaskDelete(Option<i64>, TaskDraft),
     Delete(i64),
     Nuke {
         tasks: usize,
@@ -124,6 +116,21 @@ pub struct History {
     pub directory: PathBuf,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub enum TaskPane {
+    #[default]
+    Details,
+    Subtasks,
+}
+
+pub struct TaskView {
+    pub focus: TaskPane,
+    pub task: Task,
+    pub children: Vec<Task>,
+    pub selected_child: usize,
+    pub scroll: u16,
+}
+
 pub struct App {
     pub(crate) db: Connection,
     pub(crate) palette_tasks: Vec<Task>,
@@ -143,9 +150,12 @@ pub struct App {
     pub detail_scroll: u16,
     pub(crate) help_page_size: u16,
     pub selected_task: usize,
+    pub task_view: Option<TaskView>,
+    pub(crate) task_path: Vec<i64>,
+    pub(crate) new_task_parent: Option<i64>,
+    pub(crate) viewport: Rect,
     pub navigation_focused: bool,
     pub selected_filter: usize,
     pub mode: Mode,
-    pub(crate) editor_stack: Vec<EditorFrame>,
     pub message: String,
 }

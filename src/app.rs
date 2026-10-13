@@ -3,8 +3,7 @@ use crate::{
     dates::parse_due_date,
     db,
     types::{
-        Action, App, EditorFrame, Filter, History, Mode, SubtaskDraft, SyncResult, TaskDraft,
-        TaskField,
+        Action, App, Filter, History, Mode, SyncResult, TaskDraft, TaskField, TaskPane, TaskView,
     },
     Result,
 };
@@ -33,10 +32,13 @@ impl App {
             detail_scroll: 0,
             help_page_size: 20,
             selected_task: 0,
+            task_view: None,
+            task_path: vec![],
+            new_task_parent: None,
+            viewport: ratatui::layout::Rect::new(0, 0, 80, 24),
             navigation_focused: true,
             selected_filter: 0,
             mode: Mode::Browse,
-            editor_stack: vec![],
             message: String::new(),
             db,
         };
@@ -48,6 +50,12 @@ impl App {
     }
 
     pub fn resize(&mut self, height: u16) {
+        self.viewport.height = height;
+        if let Some(view) = &mut self.task_view {
+            view.scroll = view
+                .scroll
+                .min(crate::ui::task_detail_scroll_bounds(view, self.viewport).0);
+        }
         self.help_page_size = height.saturating_sub(4).max(1);
         let maximum = self.max_help_scroll();
         if let Mode::Help { scroll } = &mut self.mode {
@@ -90,6 +98,197 @@ impl App {
             )?
         };
         self.selected_task = self.selected_task.min(self.tasks.len().saturating_sub(1));
+        self.refresh_task_view()
+    }
+
+    fn clear_task_view(&mut self) {
+        self.task_view = None;
+        self.task_path.clear();
+    }
+
+    fn refresh_task_view(&mut self) -> Result<()> {
+        let Some(view) = &self.task_view else {
+            return Ok(());
+        };
+        let (mut id, old_id, selected, scroll, focus) = (
+            view.task.id,
+            view.task.id,
+            view.selected_child,
+            view.scroll,
+            view.focus,
+        );
+        let tasks = db::list_tasks(&self.db, Filter::All)?;
+        loop {
+            if let Some(task) = tasks
+                .iter()
+                .find(|task| task.id == id && task.project_id == self.current_project)
+            {
+                let children: Vec<_> = tasks
+                    .iter()
+                    .filter(|child| child.parent_id == Some(id))
+                    .cloned()
+                    .collect();
+                let selected_child = if id == old_id {
+                    selected.min(children.len().saturating_sub(1))
+                } else {
+                    0
+                };
+                let mut view = TaskView {
+                    focus: if id == old_id && !children.is_empty() {
+                        focus
+                    } else {
+                        TaskPane::Details
+                    },
+                    task: task.clone(),
+                    children,
+                    selected_child,
+                    scroll: if id == old_id { scroll } else { 0 },
+                };
+                view.scroll = view
+                    .scroll
+                    .min(crate::ui::task_detail_scroll_bounds(&view, self.viewport).0);
+                self.task_view = Some(view);
+                return Ok(());
+            }
+            if let Some(parent) = self.task_path.pop() {
+                id = parent;
+            } else {
+                self.clear_task_view();
+                return Ok(());
+            }
+        }
+    }
+
+    fn open_task(&mut self, id: i64, child: bool) -> Result<()> {
+        let tasks = db::list_tasks(&self.db, Filter::All)?;
+        let task = tasks
+            .iter()
+            .find(|task| task.id == id)
+            .ok_or("Task no longer exists")?
+            .clone();
+        if child {
+            if let Some(view) = &self.task_view {
+                self.task_path.push(view.task.id);
+            }
+        } else {
+            self.task_path.clear();
+            let mut parent = task.parent_id;
+            while let Some(id) = parent {
+                if self.task_path.len() > MAX_SUBTASK_DEPTH {
+                    return Err("Invalid task hierarchy".into());
+                }
+                self.task_path.push(id);
+                parent = tasks
+                    .iter()
+                    .find(|task| task.id == id)
+                    .ok_or("Subtask parent is missing")?
+                    .parent_id;
+            }
+            self.task_path.reverse();
+        }
+        let children = tasks
+            .into_iter()
+            .filter(|child| child.parent_id == Some(id))
+            .collect();
+        self.task_view = Some(TaskView {
+            focus: TaskPane::Details,
+            task,
+            children,
+            selected_child: 0,
+            scroll: 0,
+        });
+        Ok(())
+    }
+
+    fn back_task(&mut self) -> Result<()> {
+        let child = self.task_view.as_ref().map(|view| view.task.id);
+        if let Some(parent) = self.task_path.pop() {
+            self.open_task(parent, false)?;
+            if let Some(view) = &mut self.task_view {
+                view.focus = if view.children.is_empty() {
+                    TaskPane::Details
+                } else {
+                    TaskPane::Subtasks
+                };
+                view.selected_child = view
+                    .children
+                    .iter()
+                    .position(|task| Some(task.id) == child)
+                    .unwrap_or(0);
+            }
+        } else {
+            self.clear_task_view();
+        }
+        Ok(())
+    }
+
+    fn current_task_id(&self) -> Option<i64> {
+        self.task_view
+            .as_ref()
+            .filter(|_| !self.navigation_focused)
+            .map(|view| view.task.id)
+            .or_else(|| self.tasks.get(self.selected_task).map(|task| task.id))
+    }
+
+    fn handle_opened_task_key(&mut self, key: KeyCode) -> Result<()> {
+        let Some(view) = &mut self.task_view else {
+            return Ok(());
+        };
+        let (maximum, page) = crate::ui::task_detail_scroll_bounds(view, self.viewport);
+        match key {
+            KeyCode::Left | KeyCode::Right if !view.children.is_empty() => {
+                view.focus = match view.focus {
+                    TaskPane::Details => TaskPane::Subtasks,
+                    TaskPane::Subtasks => TaskPane::Details,
+                };
+            }
+            KeyCode::Up if view.focus == TaskPane::Subtasks => {
+                view.selected_child = view.selected_child.saturating_sub(1)
+            }
+            KeyCode::Down if view.focus == TaskPane::Subtasks => {
+                view.selected_child =
+                    (view.selected_child + 1).min(view.children.len().saturating_sub(1))
+            }
+            KeyCode::Up => view.scroll = view.scroll.saturating_sub(1),
+            KeyCode::Down => view.scroll = view.scroll.saturating_add(1).min(maximum),
+            KeyCode::PageUp => view.scroll = view.scroll.saturating_sub(page),
+            KeyCode::PageDown => view.scroll = view.scroll.saturating_add(page).min(maximum),
+            KeyCode::Home => view.scroll = 0,
+            KeyCode::End => view.scroll = maximum,
+            KeyCode::Enter if view.focus == TaskPane::Subtasks => {
+                if let Some(child) = view.children.get(view.selected_child) {
+                    let id = child.id;
+                    self.open_task(id, true)?;
+                }
+            }
+            KeyCode::Char('x') => {
+                let id = view.task.id;
+                db::toggle_task(&self.db, id)?;
+                self.refresh_tasks()?;
+            }
+            KeyCode::Char(' ') => {
+                let id = if view.focus == TaskPane::Subtasks {
+                    view.children
+                        .get(view.selected_child)
+                        .map(|child| child.id)
+                        .unwrap_or(view.task.id)
+                } else {
+                    view.task.id
+                };
+                db::toggle_task(&self.db, id)?;
+                self.refresh_tasks()?;
+            }
+            KeyCode::Enter | KeyCode::Char('r') => {
+                self.execute_action(Action::Edit)?;
+            }
+            KeyCode::Char('d') => {
+                self.execute_action(Action::Delete)?;
+            }
+            KeyCode::Char('m') => {
+                self.execute_action(Action::Move)?;
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -146,7 +345,6 @@ impl App {
             Mode::Browse => self.handle_browse_key(key)?,
             Mode::Help { .. } => self.handle_help_key(key),
             Mode::Edit(..) => self.handle_edit_key(key)?,
-            Mode::SubtaskDelete(..) => self.handle_subtask_delete_key(key),
             Mode::Delete(id) => self.handle_delete_key(key, id)?,
             Mode::Nuke { .. } => self.handle_nuke_key(key)?,
             Mode::Palette { .. } => return self.handle_palette_key(key),
@@ -174,6 +372,9 @@ impl App {
             KeyCode::Left | KeyCode::Right if self.navigation_focused => self.cycle_section(key)?,
             KeyCode::Char('2') => self.focus_projects()?,
             KeyCode::Char('3') => self.focus_commits(),
+            KeyCode::Esc if self.task_view.is_some() && !self.navigation_focused => {
+                self.back_task()?
+            }
             KeyCode::Esc => self.navigation_focused = true,
             _ if self.commits_focused => self.handle_commit_key(key),
             _ if self.navigation_focused && self.projects_focused => {
@@ -183,6 +384,7 @@ impl App {
                 self.execute_action(Action::Add)?;
             }
             _ if self.navigation_focused => self.handle_navigation_key(key)?,
+            _ if self.task_view.is_some() => self.handle_opened_task_key(key)?,
             _ => self.handle_task_key(key)?,
         }
         Ok(())
@@ -237,6 +439,7 @@ impl App {
     }
 
     fn focus_inbox(&mut self) -> Result<()> {
+        self.clear_task_view();
         self.navigation_focused = true;
         self.projects_focused = false;
         self.commits_focused = false;
@@ -269,6 +472,7 @@ impl App {
     }
 
     fn focus_commits(&mut self) {
+        self.clear_task_view();
         self.navigation_focused = true;
         self.projects_focused = false;
         self.commits_focused = true;
@@ -581,6 +785,7 @@ impl App {
     }
 
     fn select_filter(&mut self, filter: usize) -> Result<()> {
+        self.clear_task_view();
         self.selected_filter = filter;
         self.selected_task = 0;
         self.refresh_tasks()
@@ -597,7 +802,20 @@ impl App {
                 self.selected_task = self.selected_task.saturating_sub(1);
                 return Ok(());
             }
-            KeyCode::Enter | KeyCode::Char('e') => Action::Edit,
+            KeyCode::Enter => {
+                if let Some(id) = self.current_task_id() {
+                    self.open_task(id, false)?;
+                }
+                return Ok(());
+            }
+            KeyCode::Char('x') => {
+                if let Some(id) = self.current_task_id() {
+                    db::toggle_task(&self.db, id)?;
+                    self.refresh_tasks()?;
+                }
+                return Ok(());
+            }
+            KeyCode::Char('r') => Action::Edit,
             KeyCode::Char('d') => Action::Delete,
             KeyCode::Char('m') => Action::Move,
             KeyCode::Char(' ') => Action::ToggleCompletion,
@@ -613,30 +831,50 @@ impl App {
                 if self.commits_focused {
                     self.focus_inbox()?;
                 }
-                self.editor_stack.clear();
-                self.mode = Mode::Edit(None, TaskDraft::default());
+                self.new_task_parent = self
+                    .task_view
+                    .as_ref()
+                    .filter(|_| !self.navigation_focused)
+                    .map(|view| view.task.id);
+                let depth = if let Some(parent) = self.new_task_parent {
+                    db::task_draft(&self.db, parent)?.depth + 1
+                } else {
+                    0
+                };
+                if depth > MAX_SUBTASK_DEPTH {
+                    self.new_task_parent = None;
+                    self.message = "Subtask nesting limit reached".into();
+                    return Ok(false);
+                }
+                self.mode = Mode::Edit(
+                    None,
+                    TaskDraft {
+                        depth,
+                        ..TaskDraft::default()
+                    },
+                );
             }
             Action::Edit => {
-                if let Some(task) = self.tasks.get(self.selected_task) {
-                    self.editor_stack.clear();
-                    self.mode = Mode::Edit(Some(task.id), db::task_draft(&self.db, task.id)?);
+                if let Some(id) = self.current_task_id() {
+                    self.new_task_parent = None;
+                    self.mode = Mode::Edit(Some(id), db::task_draft(&self.db, id)?);
                 }
             }
             Action::Delete => {
-                if let Some(task) = self.tasks.get(self.selected_task) {
-                    self.mode = Mode::Delete(task.id);
+                if let Some(id) = self.current_task_id() {
+                    self.mode = Mode::Delete(id);
                 }
             }
             Action::ToggleCompletion => {
-                if let Some(task) = self.tasks.get(self.selected_task) {
-                    db::toggle_task(&self.db, task.id)?;
+                if let Some(id) = self.current_task_id() {
+                    db::toggle_task(&self.db, id)?;
                     self.refresh_tasks()?;
                 }
             }
             Action::Move => {
-                if let Some(task) = self.tasks.get(self.selected_task) {
+                if let Some(id) = self.current_task_id() {
                     self.mode = Mode::Move {
-                        task: task.id,
+                        task: id,
                         selected: 0,
                     };
                 }
@@ -664,10 +902,8 @@ impl App {
                 self.select_filter(0)?;
                 if let Some(index) = self.tasks.iter().position(|task| task.id == id) {
                     self.selected_task = index;
-                } else {
-                    self.editor_stack.clear();
-                    self.mode = Mode::Edit(Some(id), db::task_draft(&self.db, id)?);
                 }
+                self.open_task(id, false)?;
                 self.navigation_focused = false;
             }
             Action::Quit => return Ok(true),
@@ -695,7 +931,7 @@ impl App {
             return vec![];
         };
         let query = query.trim().to_lowercase();
-        let has_task = !self.commits_focused && self.tasks.get(self.selected_task).is_some();
+        let has_task = !self.commits_focused && self.current_task_id().is_some();
         ACTIONS
             .iter()
             .copied()
@@ -772,19 +1008,16 @@ impl App {
                 draft.focus = match draft.focus {
                     TaskField::Title => TaskField::Description,
                     TaskField::Description => TaskField::DueDate,
-                    TaskField::DueDate => TaskField::Subtasks,
-                    TaskField::Subtasks => TaskField::Title,
+                    TaskField::DueDate => TaskField::Title,
                 }
             }
             KeyCode::BackTab => {
                 draft.focus = match draft.focus {
-                    TaskField::Title => TaskField::Subtasks,
+                    TaskField::Title => TaskField::DueDate,
                     TaskField::Description => TaskField::Title,
-                    TaskField::Subtasks => TaskField::DueDate,
                     TaskField::DueDate => TaskField::Description,
                 }
             }
-            _ if draft.focus == TaskField::Subtasks => self.handle_subtasks_key(key),
             KeyCode::Enter if draft.focus == TaskField::Description => draft.description.push('\n'),
             KeyCode::Enter => self.save_edit()?,
             KeyCode::Char(character) => {
@@ -811,103 +1044,8 @@ impl App {
     }
 
     fn cancel_edit(&mut self) {
-        self.mode = if let Some(mut parent) = self.editor_stack.pop() {
-            if parent.adding {
-                parent.draft.subtasks.remove(parent.draft.selected_subtask);
-            }
-            parent.draft.selected_subtask = parent
-                .draft
-                .selected_subtask
-                .min(parent.draft.subtasks.len().saturating_sub(1));
-            Mode::Edit(parent.id, parent.draft)
-        } else {
-            Mode::Browse
-        };
-    }
-
-    fn handle_subtasks_key(&mut self, key: KeyCode) {
-        let Mode::Edit(_, draft) = &mut self.mode else {
-            return;
-        };
-        match key {
-            KeyCode::Up => draft.selected_subtask = draft.selected_subtask.saturating_sub(1),
-            KeyCode::Down => {
-                draft.selected_subtask =
-                    (draft.selected_subtask + 1).min(draft.subtasks.len().saturating_sub(1))
-            }
-            KeyCode::Char('a') => self.open_subtask(true),
-            KeyCode::Enter | KeyCode::Char('e') => self.open_subtask(false),
-            KeyCode::Char(' ') => {
-                if let Some(child) = draft.subtasks.get_mut(draft.selected_subtask) {
-                    if child.done {
-                        child.done = false;
-                    } else {
-                        Self::complete_subtask(child);
-                    }
-                }
-            }
-            KeyCode::Char('d') if !draft.subtasks.is_empty() => {
-                if let Mode::Edit(id, draft) = std::mem::replace(&mut self.mode, Mode::Browse) {
-                    self.mode = Mode::SubtaskDelete(id, draft);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn complete_subtask(child: &mut SubtaskDraft) {
-        child.done = true;
-        for descendant in &mut child.draft.subtasks {
-            Self::complete_subtask(descendant);
-        }
-    }
-
-    fn open_subtask(&mut self, adding: bool) {
-        if adding && matches!(&self.mode, Mode::Edit(_, draft) if draft.depth >= MAX_SUBTASK_DEPTH)
-        {
-            self.message = "Subtask nesting limit reached".into();
-            return;
-        }
-        let Mode::Edit(id, mut draft) = std::mem::replace(&mut self.mode, Mode::Browse) else {
-            return;
-        };
-        if adding {
-            draft.selected_subtask = draft.subtasks.len();
-            draft.subtasks.push(SubtaskDraft {
-                id: None,
-                done: false,
-                draft: TaskDraft {
-                    depth: draft.depth + 1,
-                    ..TaskDraft::default()
-                },
-            });
-        }
-        let Some(child) = draft.subtasks.get(draft.selected_subtask) else {
-            self.mode = Mode::Edit(id, draft);
-            return;
-        };
-        let mut child_draft = child.draft.clone();
-        child_draft.focus = TaskField::Title;
-        child_draft.depth = draft.depth + 1;
-        self.mode = Mode::Edit(child.id, child_draft);
-        self.editor_stack.push(EditorFrame { id, draft, adding });
-    }
-
-    fn handle_subtask_delete_key(&mut self, key: KeyCode) {
-        if !matches!(key, KeyCode::Enter | KeyCode::Esc) {
-            return;
-        }
-        let Mode::SubtaskDelete(id, mut draft) = std::mem::replace(&mut self.mode, Mode::Browse)
-        else {
-            return;
-        };
-        if key == KeyCode::Enter {
-            draft.subtasks.remove(draft.selected_subtask);
-            draft.selected_subtask = draft
-                .selected_subtask
-                .min(draft.subtasks.len().saturating_sub(1));
-        }
-        self.mode = Mode::Edit(id, draft);
+        self.new_task_parent = None;
+        self.mode = Mode::Browse;
     }
 
     fn save_edit(&mut self) -> Result<()> {
@@ -926,16 +1064,25 @@ impl App {
             self.mode = Mode::Edit(id, draft);
             return Ok(());
         }
-        if let Some(mut parent) = self.editor_stack.pop() {
-            parent.draft.subtasks[parent.draft.selected_subtask].draft = draft;
-            self.mode = Mode::Edit(parent.id, parent.draft);
-            return Ok(());
-        }
-        if let Err(error) = db::save_task_tree(&self.db, id, &draft, self.current_project) {
+        let result = if let Some(parent) = self.new_task_parent {
+            db::save_subtask_tree(&self.db, parent, &draft)
+        } else if let Some(id) = id {
+            db::reword_task(&self.db, id, &draft)
+        } else {
+            db::save_task_tree(&self.db, None, &draft, self.current_project)
+        };
+        if let Err(error) = result {
             self.mode = Mode::Edit(id, draft);
             return Err(error);
         }
-        self.refresh_tasks()
+        let added_child = self.new_task_parent.take().is_some();
+        self.refresh_tasks()?;
+        if added_child {
+            if let Some(view) = &mut self.task_view {
+                view.selected_child = view.children.len().saturating_sub(1);
+            }
+        }
+        Ok(())
     }
 
     fn refresh_projects(&mut self) -> Result<()> {

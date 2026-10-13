@@ -24,10 +24,12 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | 0 / 1 / 2 / 3 while browsing | Focus right preview / Inbox / Projects / Commits          |
 | Left / Right in left panel   | Cycle Inbox → Projects → Commits with wraparound; left reverses                |
 | Up / Down                    | Choose Inbox filter in navigation, or task in main panel |
-| Enter                        | Open Inbox filter / edit selected task                   |
-| a                            | Add task; in Projects section, add project                |
-| e                            | Edit task; in Projects section, rename project            |
-| Space                        | Toggle completion in main panel                          |
+| Enter                        | Focus task list; open task/subtask details               |
+| a                            | Add task; add child inside an opened task; add project in Projects |
+| r in Tasks                   | Reword task in a Title / Description / Due date popup     |
+| e in Projects                | Rename project                                           |
+| Space                        | Toggle selected row (opened leaf: toggle that task)       |
+| x                            | Toggle opened/selected task between completed and pending |
 | d                            | Request task/project deletion in its section              |
 | Shift+D while browsing       | Confirm deletion of tasks, projects, local history and remote settings |
 | m in Tasks                   | Move task to Inbox or a project; arrows and Enter choose  |
@@ -37,7 +39,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Enter in deletion dialog     | Confirm permanent deletion                               |
 | Esc in deletion dialog       | Cancel deletion                                          |
 | Enter in text entry          | Save title; in task Description, insert newline           |
-| Tab / Shift+Tab in editor    | Cycle Title / Description / Due date / Subtasks           |
+| Tab / Shift+Tab in editor    | Cycle Title / Description / Due date                      |
 | Ctrl+S outside Title         | Save the current task editor                              |
 | Backspace in text entry      | Remove last character                                    |
 | Esc in text entry            | Discard changes                                          |
@@ -48,13 +50,23 @@ All deletion confirmations use only **Enter** to confirm and **Esc** to cancel; 
 
 Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Editing is intentionally append/backspace only. Project input dialogs use 3 rows and 70% of the terminal width (minimum 60 columns, reduced to fit smaller terminals), with Enter/Esc in the bottom border; errors add one row. Long title input scrolls horizontally to keep its end visible. Long titles remain stored but may be clipped in the task list. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
 
+## Opened tasks
+
+Press **Enter** on a task to replace the right-hand list with its title, description, status, and due date—no popup. A second **Subtasks** section appears only when children exist.
+
+1. Details are focused first. **Left/Right** cycles Details ↔ Subtasks when children exist, like the sidebar. Tab/Shift+Tab does nothing while browsing. In Subtasks, **Up/Down** selects a child and **Enter** opens its details.
+2. **a** opens a creation form for a child of the opened task. Saving returns to the parent view; Esc cancels.
+3. **Enter** while Details is focused opens the same three-field reword popup as **r**. In Subtasks, Enter still opens the selected child's details. **x** toggles that task between completed and pending. Completing also completes every descendant; reopening leaves descendants unchanged.
+4. **PageUp/PageDown** scroll the details; **Home/End** jump. Up/Down scroll while Details is focused.
+5. **Esc** returns to the parent, then the main task list, then the sidebar. Space toggles the selected child in Subtasks, or the opened task in Details.
+
 ## Task descriptions
 
-Adding or editing a task opens **Title**, **Description**, **Due date**, and **Subtasks** sections using 70% of the terminal width, centered with a minimum width of 60 columns. The editor also uses 70% of the terminal height (minimum 15 rows, reduced to fit), centered vertically. Title stays compact; Description and Subtasks share the extra height. On smaller terminals, both dimensions shrink to fit. Title is focused initially: **Enter** saves the whole task and **Esc** cancels. **Tab** cycles Title → Description → Due date → Subtasks; **Shift+Tab** cycles backward. Description's top-right border shows the focus hint.
+**a** creates a task and **r** rewords one using the same three-field popup: **Title**, **Description**, and **Due date** only. Subtasks are managed in the right panel, not inside the popup. The popup uses 70% of the terminal width (minimum 60 columns) and 70% of its height (minimum 15 rows), centered and reduced to fit small terminals. Title and Due date stay compact; Description takes the remaining height. Title is focused initially: **Enter** saves and **Esc** cancels. **Tab** cycles Title → Description → Due date → Title; **Shift+Tab** cycles backward. Description's top-right border shows the focus hint. Rewording preserves existing subtasks and their details.
 
 In Description, **Enter** inserts a newline and **Ctrl+S** saves the entire task. **Esc** cancels all draft changes. Only the focused field shows its save/cancel footer and cursor. Description text wraps and scrolls to keep the input end visible. Editing remains append/backspace only; descriptions are optional and preserve whitespace.
 
-The task list shows the first nonblank description line beneath its title, indented in dim dark gray. An ellipsis indicates additional lines; open the editor for the full text. Empty descriptions take no extra row. Terminal font size is fixed, so subdued styling provides the visual hierarchy.
+The task list shows the first nonblank description line beneath its title, indented in dim dark gray. An ellipsis indicates additional lines; press Enter for full details, or r to reword. Empty descriptions take no extra row. Terminal font size is fixed, so subdued styling provides the visual hierarchy.
 
 Existing tasks get empty descriptions automatically. Descriptions persist across restarts and are included in Git snapshots and safe Pull. Older snapshots without descriptions remain readable and are upgraded when applied.
 
@@ -66,21 +78,21 @@ Tasks and subtasks have independent deadlines. Titles show a `[due: YYYY-MM-DD]`
 
 ## Subtasks
 
-Open a task with **e** or **Enter**, then press **Tab three times** to focus **Subtasks**. **a** opens a child editor; children have their own title, description, and Subtasks section. Nesting supports up to 64 levels.
+Press **Enter** to open a task's details, then **a** to create a child using the three-field popup. Nesting supports up to 64 levels.
 
-1. **Up/Down** selects a child; **Enter/e** edits it.
-2. **Space** completes that child and every descendant. Reopening it leaves descendants unchanged. Completing a task in the main list likewise completes its entire tree.
-3. **d** stages removal of a child and its descendants after Enter/Esc confirmation.
-4. Saving a child returns to its parent draft; **Esc** cancels that child edit.
-5. Save the outermost editor with **Enter from Title** or **Ctrl+S from Description/Due date/Subtasks** to persist the whole tree in one transaction. **Esc at the outermost editor discards all staged changes**.
+1. **Right** focuses Subtasks; **Up/Down** selects a child and **Enter** opens its details with Details focused. **r** rewords the opened task/subtask.
+2. **Space** toggles the selected child; **x** toggles the opened task. Completing cascades to descendants; reopening affects only that task.
+3. **d** deletes the opened task and descendants after Enter/Esc confirmation; Esc cancels.
+4. Saving a new child persists it immediately and returns to its parent view. Esc cancels only the current popup, never previously saved children.
+5. **Esc** in task details returns to the parent; keep pressing to return to the main list and sidebar.
 
-Only top-level tasks appear in Inbox/project lists; manage children inside the editor. Titles show their direct-child count, such as `Task (2 subtasks)`, in both lists and editors. Completed children count too; tasks without children show no count. Ctrl+K searches subtasks too and opens their editor directly. Subtasks inherit their parent's project; moving or deleting a task affects its entire subtree. Descriptions, completion state, and parent relationships persist across restarts and Git snapshots. Legacy databases and snapshots migrate automatically; safe Pull rejects cycles, missing parents, and cross-project child references.
+Only top-level tasks appear in Inbox/project lists; manage children in the right panel. Titles show their direct-child count, such as `Task (2 subtasks)`, in lists and opened views. Completed children count too; tasks without children show no count. Ctrl+K searches subtasks too and opens their details directly; r rewords them. Subtasks inherit their parent's project; moving or deleting a task affects its entire subtree. Descriptions, completion state, and parent relationships persist across restarts and Git snapshots. Legacy databases and snapshots migrate automatically; safe Pull rejects cycles, missing parents, and cross-project child references.
 
 ## Projects
 
 The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to create a project. Use arrows to select a project: its tasks preview immediately on the right. **Enter** focuses those tasks. The focused panel has a bold bright-yellow border and a black-on-yellow title, even when its list is empty. Only its row cursor is highlighted; inactive panels have dark-gray borders and no highlighted cursor. **e** renames it. Names must be nonblank and unique.
 
-New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** from Tasks returns to its navigation section. Tab remains disabled while browsing.
+New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** returns through any opened task ancestry to the main list, then to its navigation section. Tab/Shift+Tab remains disabled while browsing, including opened tasks. It still cycles fields inside task popups.
 
 **Deleting a project permanently deletes all its tasks**, after explicit confirmation. Esc cancels. Existing databases migrate automatically, preserving old tasks in Inbox.
 

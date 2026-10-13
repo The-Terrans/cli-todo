@@ -36,7 +36,9 @@ fn run(app: &mut App) -> Result<()> {
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
-    app.resize(terminal.size()?.height);
+    let size = terminal.size()?;
+    app.viewport.width = size.width;
+    app.resize(size.height);
     loop {
         app.poll_sync();
         terminal.draw(|frame| ui::draw(frame, app))?;
@@ -49,7 +51,10 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     return Ok(());
                 }
             }
-            Event::Resize(_, height) => app.resize(height),
+            Event::Resize(width, height) => {
+                app.viewport.width = width;
+                app.resize(height);
+            }
             _ => {}
         }
     }

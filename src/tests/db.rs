@@ -2,6 +2,66 @@ use super::*;
 use std::{env, fs, time::SystemTime};
 
 #[test]
+fn reword_updates_only_task_fields_and_rolls_back_invalid_dates() -> Result<()> {
+    let db = open(Path::new(":memory:"))?;
+    save_project(&db, None, "Work")?;
+    let project = db.last_insert_rowid();
+    save_task_tree(&db, None, &nested_draft(), Some(project))?;
+    let before = list_tasks(&db, Filter::All)?;
+    let id = before[0].id;
+    let mut draft = task_draft(&db, id)?;
+    draft.title = "reworded".into();
+    draft.description = "new notes".into();
+    draft.due_date = "2028-02-29".into();
+    draft.subtasks.clear();
+    reword_task(&db, id, &draft)?;
+    let after = list_tasks(&db, Filter::All)?;
+    assert_eq!(after[0].title, "reworded");
+    assert_eq!(after[0].description, "new notes");
+    assert_eq!(after[0].due_date, parse_due_date("2028-02-29")?);
+    assert_eq!(after[0].project_id, Some(project));
+    assert_eq!(after[0].done, before[0].done);
+    assert_eq!(&after[1..], &before[1..]);
+    draft.title = "must roll back".into();
+    draft.due_date = "2026-02-30".into();
+    assert!(reword_task(&db, id, &draft).is_err());
+    assert_eq!(list_tasks(&db, Filter::All)?, after);
+    Ok(())
+}
+
+#[test]
+fn adding_children_inherits_project_and_completion_can_toggle() -> Result<()> {
+    let db = open(Path::new(":memory:"))?;
+    save_project(&db, None, "Work")?;
+    let project = db.last_insert_rowid();
+    save_task_tree(&db, None, &nested_draft(), Some(project))?;
+    let parent = list_tasks(&db, Filter::All)?[0].id;
+    toggle_task(&db, parent)?;
+    save_subtask_tree(
+        &db,
+        parent,
+        &TaskDraft {
+            title: "new child".into(),
+            ..TaskDraft::default()
+        },
+    )?;
+    let tasks = list_tasks(&db, Filter::All)?;
+    assert_eq!(tasks.last().unwrap().parent_id, Some(parent));
+    assert_eq!(tasks.last().unwrap().project_id, Some(project));
+    assert!(!tasks.last().unwrap().done);
+    toggle_task(&db, parent)?;
+    assert!(!list_tasks(&db, Filter::All)?[0].done);
+    toggle_task(&db, parent)?;
+    assert!(list_tasks(&db, Filter::All)?.iter().all(|task| task.done));
+    toggle_task(&db, parent)?;
+    let tasks = list_tasks(&db, Filter::All)?;
+    assert!(!tasks[0].done);
+    assert!(tasks[1..].iter().all(|task| task.done));
+    assert_eq!(list_tasks_in(&db, Filter::All, Some(project))?.len(), 1);
+    Ok(())
+}
+
+#[test]
 fn due_dates_persist_for_tasks_and_subtasks_without_reordering() -> Result<()> {
     let stamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
