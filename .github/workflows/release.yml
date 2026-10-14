@@ -1,0 +1,109 @@
+name: Release binaries and Nix flake
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+    env:
+      TARGET: ${{ matrix.target }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - name: Validate release version and packaging tests
+        run: |
+          python3 scripts/package_release.py --tag "$RELEASE_TAG" --repository "$RELEASE_REPOSITORY" --check
+          python3 -m unittest discover -s tests -p 'test_release.py'
+      - name: Install Linux static linker
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          echo 'CC=musl-gcc' >> "$GITHUB_ENV"
+          echo 'RUSTFLAGS=-C linker=musl-gcc' >> "$GITHUB_ENV"
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target "$TARGET"
+          rustup default stable
+      - name: Format, test, lint, and build
+        run: |
+          cargo fmt --check
+          cargo test --locked --features rusqlite/bundled --target "$TARGET"
+          cargo clippy --locked --all-targets --features rusqlite/bundled --target "$TARGET" -- -D warnings
+          cargo build --locked --release --features rusqlite/bundled --target "$TARGET"
+      - name: Check Linux binary is static
+        if: runner.os == 'Linux'
+        run: |
+          if readelf -l "target/$TARGET/release/cli-todo" | grep -q INTERP; then
+            echo 'Expected a static Linux binary, found a dynamic interpreter' >&2
+            exit 1
+          fi
+      - name: Terminal smoke test against release binary
+        run: CLI_TODO_BINARY="target/$TARGET/release/cli-todo" python3 tests/smoke.py
+      - name: Archive binary
+        run: |
+          mkdir -p dist
+          tar -czf "dist/cli-todo-$RELEASE_TAG-$TARGET.tar.gz" -C "target/$TARGET/release" cli-todo
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binary-*
+          path: dist
+          merge-multiple: true
+      - name: Package hash-pinned Nix flake and checksums
+        run: python3 scripts/package_release.py --tag "$RELEASE_TAG" --repository "$RELEASE_REPOSITORY"
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - name: Check generated flake on every platform
+        run: nix flake check --no-build --all-systems path:./dist/cli-todo-flake
+      - name: Attach assets to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/SHA256SUMS --clobber

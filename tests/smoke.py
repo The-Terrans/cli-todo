@@ -12,7 +12,7 @@ import tempfile
 import termios
 import time
 
-binary = Path(__file__).resolve().parents[1] / "target/debug/cli-todo"
+binary = Path(os.environ.get("CLI_TODO_BINARY", str(Path(__file__).resolve().parents[1] / "target/debug/cli-todo"))).resolve()
 with tempfile.TemporaryDirectory() as data:
     dbpath = Path(data) / "cli-todo/tasks.sqlite3"
 

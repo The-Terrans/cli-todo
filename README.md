@@ -2,7 +2,34 @@
 
 A local Rust terminal todo app using Ratatui and SQLite. Inbox, projects, and todo commits in the left panel; task or commit previews in the right panel, keyboard-only controls.
 
-## Run
+## Install a prebuilt release
+
+After the first release containing this workflow finishes, run without compiling Rust:
+
+```sh
+nix run https://github.com/The-Terrans/cli-todo/releases/latest/download/cli-todo-flake.tar.gz
+```
+
+Or install it into your Nix profile:
+
+```sh
+nix profile install https://github.com/The-Terrans/cli-todo/releases/latest/download/cli-todo-flake.tar.gz
+cli-todo
+```
+
+The release flake downloads a SHA-256-pinned binary for **Linux or macOS, x86_64 or ARM64** and installs it; it does not build the Rust app. Nix may download its packaging tools/dependencies. Replace `latest/download` with `download/v0.1.0` to pin a release. Install Git separately for checkpoints and sync. These URLs work only after assets are uploaded; the repository's `.nix/release/flake.nix` is a template, not an installable source flake. No Cachix account or token is required. The release flake has its own `.nix/release/flake.lock`, pinned to Nixpkgs 26.05 for Intel macOS support; the development shell stays unchanged.
+
+Without Nix, download your platform's `cli-todo-vVERSION-TARGET.tar.gz` from [Releases](https://github.com/The-Terrans/cli-todo/releases), extract it, and put `cli-todo` on your PATH. Linux releases are static musl binaries; SQLite is bundled on every platform. `SHA256SUMS` covers all binary archives and the release flake.
+
+### Publish a release
+
+1. Update the package version in `Cargo.toml` and refresh `Cargo.lock` with `cargo check`.
+2. Commit and push the version and workflow files; tag that commit as `vVERSION` (for example `v0.1.0`).
+3. Publish a GitHub release for that tag. The **Release binaries and Nix flake** workflow tests and builds all four platforms, then attaches the binaries, `cli-todo-flake.tar.gz`, and checksums.
+
+Tags must match `Cargo.toml` exactly. Draft releases do not build until published. Keep GitHub **immutable releases disabled**: this workflow attaches assets after publication. It uses the repository's built-in `GITHUB_TOKEN` with write access only in the publish job; no extra secret is needed. If Actions permissions are restricted by your organization, allow release asset uploads. Rerunning a successful workflow replaces its assets; prefer a new version rather than changing an existing release because Nix consumers pin hashes.
+
+## Develop from source
 
 ```sh
 nix develop path:./.nix
