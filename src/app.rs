@@ -864,7 +864,13 @@ impl App {
                 }
             }
             Action::Delete => {
-                if let Some(id) = self.current_task_id() {
+                let id = match self.task_view.as_ref().filter(|_| !self.navigation_focused) {
+                    Some(view) if view.focus == TaskPane::Subtasks => {
+                        view.children.get(view.selected_child).map(|child| child.id)
+                    }
+                    _ => self.current_task_id(),
+                };
+                if let Some(id) = id {
                     self.mode = Mode::Delete(id);
                 }
             }

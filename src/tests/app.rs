@@ -437,6 +437,61 @@ fn task_details_scroll_clamps_and_delete_returns_to_parent() -> Result<()> {
 }
 
 #[test]
+fn deleting_highlighted_subtasks_preserves_parent_siblings_and_focus() -> Result<()> {
+    let mut app = app()?;
+    create_task(&mut app, "parent")?;
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Enter)?;
+    create_task(&mut app, "keep")?;
+    create_task(&mut app, "delete")?;
+    let parent = app.task_view.as_ref().unwrap().task.id;
+    app.handle_key(KeyCode::Right)?;
+    app.handle_key(KeyCode::Enter)?;
+    let child = app.task_view.as_ref().unwrap().task.id;
+    create_task(&mut app, "grandchild")?;
+    app.handle_key(KeyCode::Esc)?;
+    app.handle_key(KeyCode::Char('d'))?;
+    assert!(matches!(app.mode, Mode::Delete(id) if id == child));
+    for key in ['y', 'n', 'q'] {
+        app.handle_key(KeyCode::Char(key))?;
+    }
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 4);
+    app.handle_key(KeyCode::Esc)?;
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 4);
+    app.handle_key(KeyCode::Char('d'))?;
+    app.handle_key(KeyCode::Enter)?;
+    let view = app.task_view.as_ref().unwrap();
+    assert_eq!(view.task.id, parent);
+    assert_eq!(view.focus, TaskPane::Subtasks);
+    assert_eq!(view.selected_child, 0);
+    assert_eq!(view.children.len(), 1);
+    assert_eq!(view.children[0].title, "keep");
+    assert_eq!(view.task.subtask_count, 1);
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 2);
+    let sibling = view.children[0].id;
+    app.task_view.as_mut().unwrap().selected_child = usize::MAX;
+    app.execute_action(Action::Delete)?;
+    assert!(
+        matches!(app.mode, Mode::Browse),
+        "invalid child selection must not delete its parent"
+    );
+    app.task_view.as_mut().unwrap().selected_child = 0;
+    app.execute_action(Action::Delete)?;
+    assert!(matches!(app.mode, Mode::Delete(id) if id == sibling));
+    app.handle_key(KeyCode::Enter)?;
+    let view = app.task_view.as_ref().unwrap();
+    assert_eq!(view.task.id, parent);
+    assert_eq!(view.focus, TaskPane::Details);
+    assert!(view.children.is_empty());
+    assert_eq!(view.task.subtask_count, 0);
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 1);
+    app.handle_key(KeyCode::Char('d'))?;
+    assert!(matches!(app.mode, Mode::Delete(id) if id == parent));
+    app.handle_key(KeyCode::Esc)?;
+    Ok(())
+}
+
+#[test]
 fn due_dates_validate_preserve_drafts_and_can_be_cleared() -> Result<()> {
     let mut app = app()?;
     app.handle_key(KeyCode::Char('a'))?;

@@ -259,8 +259,11 @@ with tempfile.TemporaryDirectory() as data:
         assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
         with sqlite3.connect(dbpath) as db:
             assert db.execute("SELECT due_date FROM tasks WHERE parent_id IS NULL").fetchone()[0] == "2000-01-01"
-        send(b"0d\r")
-        assert rows() == [], "deleting a parent must delete its descendants"
+        send(b"0\r\x1b[Cd\r")
+        assert rows() == [("parent", 0)], "d in Subtasks must delete the highlighted child subtree, not its parent"
+        send(b"aextra\r")
+        send(b"d\r")
+        assert rows() == [], "d in Details must delete the parent and its descendants"
         send(b"achore today")
         send(b"\x1b")
         send(b"\r")

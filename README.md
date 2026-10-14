@@ -93,7 +93,7 @@ Press **Enter** to open a task's details, then **a** to create a child using the
 
 1. **Right** focuses Subtasks; **Up/Down** selects a child and **Enter** opens its details with Details focused. **r** rewords the opened task/subtask.
 2. **Space** toggles the selected child; **x** toggles the opened task. Completing cascades to descendants; reopening affects only that task.
-3. **d** deletes the opened task and descendants after Enter/Esc confirmation; Esc cancels.
+3. **d** deletes the highlighted child when Subtasks is focused, or the opened task when Details is focused, including the target's descendants. Enter confirms; Esc cancels. Deleting a child preserves its parent and siblings.
 4. Saving a new child persists it immediately and returns to its parent view. Esc cancels only the current popup, never previously saved children.
 5. **Esc** in task details returns to the parent; keep pressing to return to the main list and sidebar.
 
