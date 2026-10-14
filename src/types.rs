@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use ratatui::layout::Rect;
 use rusqlite::Connection;
-use std::{error::Error, path::PathBuf, sync::mpsc::Receiver};
+use std::{error::Error, ops::Range, path::PathBuf, sync::mpsc::Receiver};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -50,11 +50,26 @@ pub enum TaskField {
     DueDate,
 }
 
+#[derive(Clone)]
+pub struct DatePhrase {
+    pub range: Range<usize>,
+    pub date: NaiveDate,
+}
+
+#[derive(Clone)]
+pub struct AutoDate {
+    pub previous_due_date: String,
+    pub field: TaskField,
+    pub phrase: DatePhrase,
+}
+
 #[derive(Clone, Default)]
 pub struct TaskDraft {
     pub title: String,
     pub description: String,
     pub due_date: String,
+    pub auto_date: Option<AutoDate>,
+    pub ignored_dates: Vec<(TaskField, String)>,
     pub focus: TaskField,
     pub subtasks: Vec<SubtaskDraft>,
     pub depth: usize,

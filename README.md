@@ -74,6 +74,17 @@ Existing tasks get empty descriptions automatically. Descriptions persist across
 
 From Title, press **Tab twice** to focus **Due date**. Enter an optional **YYYY-MM-DD** date (for example `2028-02-29`); blank input clears it. **Enter** or **Ctrl+S** saves the current editor. Invalid calendar dates keep the draft open and focus the date field.
 
+While typing, recognized English date phrases in **Title or Description** are highlighted in yellow with an underline and immediately fill Due date, **replacing its existing value**. Saving removes only the active highlighted phrase from the text. Dates are relative to your local day. Supported phrases:
+
+- `today` / `tod`, `tomorrow` / `tom`
+- `next week` (+7 days), `next month` (same day next calendar month, clamped to month end), `next Monday` (or another weekday; full/abbreviated names)
+- `in 3 days`, `in 2 weeks` (any nonnegative whole number)
+- `12 oct 2026`, `12 October 2026`, `2026-10-12`, `12-12-2000` (**DD-MM-YYYY**)
+
+For example, `do chores tomorrow` saves as `do chores` with tomorrow's deadline. Matching uses whole words and is case-insensitive; invalid dates stay as ordinary text. The first non-dismissed phrase wins, checking Title before Description. Saving a date-only title is refused without discarding your draft.
+
+**Esc** clears an active automatic date and its highlight, leaves the keyword as normal text, and keeps the popup open. Esc again cancels the popup. **Backspace at the keyword** deletes a character and clears the automatic date/highlight; deleting unrelated text keeps the guess. Backspace never creates a new guess from a shortened alias. Dismissed keywords stay normal text for the current edit and are not stripped on save. Clearing a guess leaves Due date blank, not its old manual value. Editing Due date manually also dismisses detection without erasing your manual input. Ordinary words such as `tomatoes` do not replace a manual date once typing is complete.
+
 Tasks and subtasks have independent deadlines. Titles show a `[due: YYYY-MM-DD]` badge without changing task order. Unfinished tasks due **before today in your local timezone** have red badges; dates due today are not overdue, and completed tasks use muted badges. Deadlines persist in SQLite and Git snapshots; older databases/snapshots get no deadline automatically.
 
 ## Subtasks

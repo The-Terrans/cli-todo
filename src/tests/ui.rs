@@ -5,6 +5,64 @@ use ratatui::{backend::TestBackend, Terminal};
 use std::path::Path;
 
 #[test]
+fn live_date_keywords_are_highlighted_and_escape_removes_the_highlight() -> Result<()> {
+    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))?;
+    for c in "chore today".chars() {
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))?;
+    }
+    let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let highlighted: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .filter(|cell| {
+            cell.fg == Color::LightYellow && cell.modifier.contains(Modifier::UNDERLINED)
+        })
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(highlighted, "today");
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    assert!(!terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .any(|cell| cell.modifier.contains(Modifier::UNDERLINED)));
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "chore today" && draft.due_date.is_empty())
+    );
+    app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))?;
+    for c in "メモ\nnext\nweek".chars() {
+        let key = if c == '\n' {
+            KeyCode::Enter
+        } else {
+            KeyCode::Char(c)
+        };
+        app.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE))?;
+    }
+    terminal.draw(|frame| draw(frame, &app))?;
+    let highlighted: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .filter(|cell| {
+            cell.fg == Color::LightYellow && cell.modifier.contains(Modifier::UNDERLINED)
+        })
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(highlighted, "nextweek");
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.as_ref().unwrap().field == TaskField::Description)
+    );
+    Ok(())
+}
+
+#[test]
 fn task_details_use_one_third_with_a_six_row_minimum_and_fit_small_terminals() {
     for height in 0..=90 {
         let area = Rect::new(2, 3, 80, height);

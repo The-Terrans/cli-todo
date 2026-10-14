@@ -482,6 +482,50 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(text).block(panel(title, true)), area);
 }
 
+fn task_field_text(draft: &TaskDraft, field: TaskField, focused: bool) -> Text<'static> {
+    let text = if field == TaskField::Title {
+        &draft.title
+    } else {
+        &draft.description
+    };
+    let range = draft
+        .auto_date
+        .as_ref()
+        .filter(|auto| auto.field == field)
+        .map(|auto| &auto.phrase.range);
+    let mut offset = 0;
+    let mut lines = Vec::new();
+    for line in text.split('\n') {
+        let mut spans = Vec::new();
+        let start = range
+            .map(|range| range.start.saturating_sub(offset).min(line.len()))
+            .unwrap_or(0);
+        let end = range
+            .map(|range| range.end.saturating_sub(offset).min(line.len()))
+            .unwrap_or(0);
+        if start < end {
+            spans.push(Span::raw(line[..start].to_owned()));
+            spans.push(Span::styled(
+                line[start..end].to_owned(),
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            ));
+            spans.push(Span::raw(line[end..].to_owned()));
+        } else {
+            spans.push(Span::raw(line.to_owned()));
+        }
+        lines.push(Line::from(spans));
+        offset += line.len() + 1;
+    }
+    if focused {
+        if let Some(line) = lines.last_mut() {
+            line.spans.push(Span::raw("▏"));
+        }
+    }
+    Text::from(lines)
+}
+
 fn draw_task_editor(
     frame: &mut Frame,
     editing: bool,
@@ -520,17 +564,18 @@ fn draw_task_editor(
         },
         title_focused,
     );
+    let escape = if draft.auto_date.is_some() {
+        "Esc: clear date"
+    } else {
+        "Esc: cancel"
+    };
     if title_focused {
         title = title.title_bottom(
-            Line::styled(" Enter: save ── Esc: cancel ", hint).alignment(Alignment::Right),
+            Line::styled(format!(" Enter: save ── {escape} "), hint).alignment(Alignment::Right),
         );
     }
     let title_inner = title.inner(rows[0]);
-    let title_text = Line::raw(if title_focused {
-        format!("{}▏", draft.title)
-    } else {
-        draft.title.clone()
-    });
+    let title_text = task_field_text(draft, TaskField::Title, title_focused);
     let horizontal = title_text
         .width()
         .saturating_sub(title_inner.width as usize)
@@ -548,15 +593,11 @@ fn draw_task_editor(
     );
     if description_focused {
         description = description.title_bottom(
-            Line::styled(" <c-s>: save ── Esc: cancel ", hint).alignment(Alignment::Right),
+            Line::styled(format!(" <c-s>: save ── {escape} "), hint).alignment(Alignment::Right),
         );
     }
     let description_inner = description.inner(rows[1]);
-    let text = if description_focused {
-        format!("{}▏", draft.description)
-    } else {
-        draft.description.clone()
-    };
+    let text = task_field_text(draft, TaskField::Description, description_focused);
     let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
     let vertical = if description_focused {
         paragraph
@@ -602,7 +643,11 @@ fn draw_due_date(frame: &mut Frame, area: Rect, draft: &TaskDraft, message: &str
     if focused {
         block = block.title_bottom(
             Line::styled(
-                " Enter: save ── Esc: cancel ",
+                if draft.auto_date.is_some() {
+                    " Enter: save ── Esc: clear date "
+                } else {
+                    " Enter: save ── Esc: cancel "
+                },
                 Style::default()
                     .fg(Color::LightYellow)
                     .bg(Color::Reset)

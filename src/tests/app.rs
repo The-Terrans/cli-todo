@@ -158,6 +158,205 @@ fn task_views_drill_down_add_children_edit_and_complete_without_popups() -> Resu
 }
 
 #[test]
+fn date_phrases_override_due_dates_and_are_removed_on_create_reword_and_subtasks() -> Result<()> {
+    let mut app = app()?;
+    let today = chrono::Local::now().date_naive();
+    app.mode = Mode::Edit(
+        None,
+        TaskDraft {
+            title: "do chores next week".into(),
+            due_date: "2030-01-01".into(),
+            ..TaskDraft::default()
+        },
+    );
+    if let Mode::Edit(_, draft) = &mut app.mode {
+        App::update_auto_date(draft);
+    }
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[0].title, "do chores");
+    assert_eq!(
+        app.tasks[0].due_date,
+        today.checked_add_days(chrono::Days::new(7))
+    );
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Char('r'))?;
+    if let Mode::Edit(_, draft) = &mut app.mode {
+        draft.description = "finish 12 oct 2026".into();
+        App::update_auto_date(draft);
+    }
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[0].description, "finish");
+    assert_eq!(app.tasks[0].due_date, parse_due_date("2026-10-12")?);
+    app.handle_key(KeyCode::Enter)?;
+    create_task(&mut app, "child in 3 days")?;
+    let view = app.task_view.as_ref().unwrap();
+    assert_eq!(view.children[0].title, "child");
+    assert_eq!(
+        view.children[0].due_date,
+        today.checked_add_days(chrono::Days::new(3))
+    );
+    assert_eq!(view.children[0].parent_id, Some(view.task.id));
+    app.handle_key(KeyCode::Char('a'))?;
+    if let Mode::Edit(_, draft) = &mut app.mode {
+        draft.title = "tomorrow".into();
+        draft.due_date = "2030-01-01".into();
+        App::update_auto_date(draft);
+    }
+    app.handle_key(KeyCode::Enter)?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "tomorrow" && draft.auto_date.is_some())
+    );
+    assert_eq!(
+        app.message,
+        "Title cannot be empty after removing the date phrase"
+    );
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 2);
+    app.handle_key(KeyCode::Esc)?;
+    app.handle_key(KeyCode::Esc)?;
+    Ok(())
+}
+
+#[test]
+fn live_dates_can_be_dismissed_without_cancelling_and_backspace_only_clears_keywords() -> Result<()>
+{
+    let mut app = app()?;
+    app.handle_key(KeyCode::Char('a'))?;
+    if let Mode::Edit(_, draft) = &mut app.mode {
+        draft.due_date = "2030-01-01".into();
+    }
+    for c in "chore today".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.is_some() && !draft.due_date.is_empty())
+    );
+    app.handle_key(KeyCode::Esc)?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.is_none() && draft.due_date.is_empty() && draft.title == "chore today")
+    );
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[0].title, "chore today");
+    assert_eq!(app.tasks[0].due_date, None);
+    app.handle_key(KeyCode::Char('a'))?;
+    for c in "chore today note".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    app.handle_key(KeyCode::Backspace)?;
+    assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.is_some()));
+    for _ in 0..4 {
+        app.handle_key(KeyCode::Backspace)?;
+    }
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "chore today" && draft.auto_date.is_some())
+    );
+    app.handle_key(KeyCode::Backspace)?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "chore toda" && draft.auto_date.is_none() && draft.due_date.is_empty())
+    );
+    app.handle_key(KeyCode::Char('y'))?;
+    assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.is_some()));
+    app.handle_key(KeyCode::Esc)?;
+    app.handle_key(KeyCode::Char('!'))?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.is_none() && draft.due_date.is_empty())
+    );
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[1].title, "chore today!");
+    assert_eq!(app.tasks[1].due_date, None);
+    Ok(())
+}
+
+#[test]
+fn backspace_does_not_recreate_alias_dates_and_partial_words_keep_manual_dates() -> Result<()> {
+    let mut app = app()?;
+    app.mode = Mode::Edit(
+        None,
+        TaskDraft {
+            due_date: "2030-01-01".into(),
+            ..TaskDraft::default()
+        },
+    );
+    for c in "tomatoes".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.is_none() && draft.due_date == "2030-01-01")
+    );
+    app.handle_key(KeyCode::Esc)?;
+    app.handle_key(KeyCode::Char('a'))?;
+    for c in "work tomorrow".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    for _ in 0..5 {
+        app.handle_key(KeyCode::Backspace)?;
+        assert!(
+            matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.is_none() && draft.due_date.is_empty())
+        );
+    }
+    app.handle_key(KeyCode::Char('!'))?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "work tom!" && draft.auto_date.is_none())
+    );
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[0].title, "work tom!");
+    assert_eq!(app.tasks[0].due_date, None);
+    Ok(())
+}
+
+#[test]
+fn manual_date_edits_dismiss_highlights_and_keep_keyword_text() -> Result<()> {
+    let mut app = app()?;
+    app.handle_key(KeyCode::Char('a'))?;
+    for c in "work today".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    app.handle_key(KeyCode::BackTab)?;
+    for _ in 0..10 {
+        app.handle_key(KeyCode::Backspace)?;
+    }
+    for c in "2031-01-01".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.is_none()));
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[0].title, "work today");
+    assert_eq!(app.tasks[0].due_date, parse_due_date("2031-01-01")?);
+    Ok(())
+}
+
+#[test]
+fn next_month_and_day_first_dates_fill_live_from_title_and_description() -> Result<()> {
+    let mut app = app()?;
+    let expected = chrono::Local::now()
+        .date_naive()
+        .checked_add_months(chrono::Months::new(1))
+        .unwrap()
+        .to_string();
+    app.handle_key(KeyCode::Char('a'))?;
+    for c in "work next month".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.due_date == expected && draft.auto_date.is_some())
+    );
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[0].title, "work");
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Tab)?;
+    for c in "finish 12-12-2000".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.due_date == "2000-12-12" && draft.auto_date.as_ref().unwrap().field == TaskField::Description)
+    );
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
+    assert_eq!(app.tasks[0].description, "finish");
+    assert_eq!(app.tasks[0].due_date, parse_due_date("2000-12-12")?);
+    Ok(())
+}
+
+#[test]
 fn task_popups_cycle_only_title_description_and_due_date() -> Result<()> {
     let mut app = app()?;
     app.handle_key(KeyCode::Char('a'))?;

@@ -261,6 +261,29 @@ with tempfile.TemporaryDirectory() as data:
             assert db.execute("SELECT due_date FROM tasks WHERE parent_id IS NULL").fetchone()[0] == "2000-01-01"
         send(b"0d\r")
         assert rows() == [], "deleting a parent must delete its descendants"
+        send(b"achore today")
+        send(b"\x1b")
+        send(b"\r")
+        assert rows() == [("chore today", 0)], "Esc must clear the guess without cancelling the popup"
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT due_date FROM tasks").fetchone()[0] is None
+        send(b"d\r")
+        send(b"achore tomorrow")
+        send(b"\x7f\r")
+        assert rows() == [("chore tomorro", 0)]
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT due_date FROM tasks").fetchone()[0] is None
+        send(b"d\r")
+        send(b"anatural 12 oct 2026\r")
+        assert rows() == [("natural", 0)]
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT due_date FROM tasks").fetchone()[0] == "2026-10-12"
+        send(b"r\tfinish 29-02-2028\x13")
+        assert descriptions() == [("finish",)]
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT due_date FROM tasks").fetchone()[0] == "2028-02-29", "description phrases must replace an existing deadline"
+        send(b"d\r")
+        assert rows() == []
         send(b"1apreserved\r")
         with sqlite3.connect(dbpath) as db:
             db.execute("CREATE TRIGGER fail_insert BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT, 'smoke forced error'); END")
@@ -268,7 +291,7 @@ with tempfile.TemporaryDirectory() as data:
         assert b"smoke forced error" in output
         finish(1)
         assert rows() == [("preserved", 0)]
-        print("PASS: PTY due dates, nested subtasks, descriptions/Tab/Ctrl+S, help, navigation, palette, projects, checkpoints, sync, nuke, persistence, terminal restoration")
+        print("PASS: PTY due dates/date phrases, nested subtasks, descriptions/Tab/Ctrl+S, help, navigation, palette, projects, checkpoints, sync, nuke, persistence, terminal restoration")
     finally:
         if proc.poll() is None:
             proc.kill()

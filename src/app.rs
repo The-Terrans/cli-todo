@@ -1,9 +1,10 @@
 use crate::{
     constants::{ACTIONS, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH},
-    dates::parse_due_date,
+    dates::{date_phrases, parse_due_date, remove_date_phrase},
     db,
     types::{
-        Action, App, Filter, History, Mode, SyncResult, TaskDraft, TaskField, TaskPane, TaskView,
+        Action, App, AutoDate, Filter, History, Mode, SyncResult, TaskDraft, TaskField, TaskPane,
+        TaskView,
     },
     Result,
 };
@@ -1005,6 +1006,7 @@ impl App {
             return Ok(());
         };
         match key {
+            KeyCode::Esc if draft.auto_date.is_some() => Self::dismiss_auto_date(draft, true),
             KeyCode::Esc => self.cancel_edit(),
             KeyCode::Tab => {
                 draft.focus = match draft.focus {
@@ -1020,29 +1022,124 @@ impl App {
                     TaskField::DueDate => TaskField::Description,
                 }
             }
-            KeyCode::Enter if draft.focus == TaskField::Description => draft.description.push('\n'),
+            KeyCode::Enter if draft.focus == TaskField::Description => {
+                draft.description.push('\n');
+                Self::update_auto_date(draft);
+            }
             KeyCode::Enter => self.save_edit()?,
             KeyCode::Char(character) => {
                 if draft.focus == TaskField::Description {
                     draft.description.push(character);
                 } else if draft.focus == TaskField::DueDate {
+                    Self::dismiss_auto_date(draft, false);
                     draft.due_date.push(character);
                 } else {
                     draft.title.push(character);
                 }
+                if draft.focus != TaskField::DueDate {
+                    Self::update_auto_date(draft);
+                }
             }
             KeyCode::Backspace => {
+                let position = if draft.focus == TaskField::Description {
+                    draft.description.len()
+                } else {
+                    draft.title.len()
+                };
+                if draft.auto_date.as_ref().is_some_and(|auto| {
+                    auto.field == draft.focus
+                        && position > auto.phrase.range.start
+                        && position <= auto.phrase.range.end
+                }) {
+                    Self::dismiss_auto_date(draft, true);
+                }
                 if draft.focus == TaskField::Description {
                     draft.description.pop();
                 } else if draft.focus == TaskField::DueDate {
+                    Self::dismiss_auto_date(draft, false);
                     draft.due_date.pop();
                 } else {
                     draft.title.pop();
+                }
+                if draft.focus != TaskField::DueDate {
+                    Self::refresh_auto_date(draft, false);
                 }
             }
             _ => {}
         }
         Ok(())
+    }
+
+    fn dismiss_auto_date(draft: &mut TaskDraft, clear: bool) {
+        if let Some(auto) = draft.auto_date.take() {
+            let text = if auto.field == TaskField::Title {
+                &draft.title
+            } else {
+                &draft.description
+            };
+            draft
+                .ignored_dates
+                .push((auto.field, text[auto.phrase.range].to_ascii_lowercase()));
+            if clear {
+                draft.due_date.clear();
+            }
+        }
+    }
+
+    fn update_auto_date(draft: &mut TaskDraft) {
+        Self::refresh_auto_date(draft, true);
+    }
+
+    fn refresh_auto_date(draft: &mut TaskDraft, allow_new: bool) {
+        let today = chrono::Local::now().date_naive();
+        let candidates: Vec<_> = [
+            (TaskField::Title, &draft.title),
+            (TaskField::Description, &draft.description),
+        ]
+        .into_iter()
+        .flat_map(|(field, text)| {
+            date_phrases(text, today).into_iter().map(move |phrase| {
+                let keyword = text[phrase.range.clone()].to_ascii_lowercase();
+                (
+                    AutoDate {
+                        field,
+                        phrase,
+                        previous_due_date: String::new(),
+                    },
+                    keyword,
+                )
+            })
+        })
+        .collect();
+        draft.ignored_dates.retain(|ignored| {
+            candidates
+                .iter()
+                .any(|(auto, keyword)| ignored == &(auto.field, keyword.clone()))
+        });
+        if !allow_new && draft.auto_date.is_none() {
+            for (auto, keyword) in &candidates {
+                let ignored = (auto.field, keyword.clone());
+                if !draft.ignored_dates.contains(&ignored) {
+                    draft.ignored_dates.push(ignored);
+                }
+            }
+        }
+        let previous = draft
+            .auto_date
+            .as_ref()
+            .map(|auto| auto.previous_due_date.clone())
+            .unwrap_or_else(|| draft.due_date.clone());
+        let mut next = candidates
+            .into_iter()
+            .find(|(auto, keyword)| !draft.ignored_dates.contains(&(auto.field, keyword.clone())))
+            .map(|(auto, _)| auto);
+        if let Some(auto) = &mut next {
+            auto.previous_due_date = previous;
+            draft.due_date = auto.phrase.date.to_string();
+        } else if let Some(auto) = &draft.auto_date {
+            draft.due_date = auto.previous_due_date.clone();
+        }
+        draft.auto_date = next;
     }
 
     fn cancel_edit(&mut self) {
@@ -1054,24 +1151,39 @@ impl App {
         let Mode::Edit(id, mut draft) = std::mem::replace(&mut self.mode, Mode::Browse) else {
             return Ok(());
         };
-        if draft.title.trim().is_empty() {
+        let mut saved = draft.clone();
+        if let Some(auto) = &draft.auto_date {
+            let text = if auto.field == TaskField::Title {
+                &mut saved.title
+            } else {
+                &mut saved.description
+            };
+            *text = remove_date_phrase(text, auto.phrase.range.clone());
+            saved.due_date = auto.phrase.date.to_string();
+        }
+        if saved.title.trim().is_empty() {
             draft.focus = TaskField::Title;
-            self.message = "Title cannot be empty".into();
+            self.message = if draft.title.trim().is_empty() {
+                "Title cannot be empty"
+            } else {
+                "Title cannot be empty after removing the date phrase"
+            }
+            .into();
             self.mode = Mode::Edit(id, draft);
             return Ok(());
         }
-        if let Err(error) = parse_due_date(&draft.due_date) {
+        if let Err(error) = parse_due_date(&saved.due_date) {
             draft.focus = TaskField::DueDate;
             self.message = error.to_string();
             self.mode = Mode::Edit(id, draft);
             return Ok(());
         }
         let result = if let Some(parent) = self.new_task_parent {
-            db::save_subtask_tree(&self.db, parent, &draft)
+            db::save_subtask_tree(&self.db, parent, &saved)
         } else if let Some(id) = id {
-            db::reword_task(&self.db, id, &draft)
+            db::reword_task(&self.db, id, &saved)
         } else {
-            db::save_task_tree(&self.db, None, &draft, self.current_project)
+            db::save_task_tree(&self.db, None, &saved, self.current_project)
         };
         if let Err(error) = result {
             self.mode = Mode::Edit(id, draft);
