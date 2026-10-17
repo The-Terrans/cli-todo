@@ -1,4 +1,4 @@
-name: Release binaries and Nix flake
+name: Release binaries
 
 on:
   release:
@@ -31,16 +31,24 @@ jobs:
     env:
       TARGET: ${{ matrix.target }}
       RELEASE_TAG: ${{ github.event.release.tag_name }}
-      RELEASE_REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
-      - name: Validate release version and packaging tests
+      - name: Validate release version
         run: |
-          python3 scripts/package_release.py --tag "$RELEASE_TAG" --repository "$RELEASE_REPOSITORY" --check
-          python3 -m unittest discover -s tests -p 'test_release.py'
+          python3 - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', version):
+              raise SystemExit('Expected a release or prerelease Cargo version')
+          if os.environ['RELEASE_TAG'] != f'v{version}':
+              raise SystemExit(f'Release tag must match Cargo.toml: v{version}')
+          PY
       - name: Install Linux static linker
         if: runner.os == 'Linux'
         run: |
@@ -86,7 +94,6 @@ jobs:
       contents: write
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name }}
-      RELEASE_REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -97,11 +104,9 @@ jobs:
           pattern: binary-*
           path: dist
           merge-multiple: true
-      - name: Package hash-pinned Nix flake and checksums
-        run: python3 scripts/package_release.py --tag "$RELEASE_TAG" --repository "$RELEASE_REPOSITORY"
-      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
-      - name: Check generated flake on every platform
-        run: nix flake check --no-build --all-systems path:./dist/cli-todo-flake
+      - name: Generate binary checksums
+        working-directory: dist
+        run: sha256sum ./*.tar.gz > SHA256SUMS
       - name: Attach assets to the release
         env:
           GH_TOKEN: ${{ github.token }}

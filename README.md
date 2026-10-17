@@ -2,41 +2,65 @@
 
 A local Rust terminal todo app using Ratatui and SQLite. Inbox, projects, and todo commits in the left panel; task or commit previews in the right panel, keyboard-only controls.
 
-## Install a prebuilt release
+## Install with Nix
 
-After the first release containing this workflow finishes, run without compiling Rust:
+After the root flake is pushed, run from the default branch:
 
 ```sh
-nix run https://github.com/The-Terrans/cli-todo/releases/latest/download/cli-todo-flake.tar.gz
+nix run github:The-Terrans/cli-todo
 ```
 
-Or install it into your Nix profile:
+Or install into your Nix profile:
 
 ```sh
-nix profile install https://github.com/The-Terrans/cli-todo/releases/latest/download/cli-todo-flake.tar.gz
+nix profile install github:The-Terrans/cli-todo
 cli-todo
 ```
 
-The release flake downloads a SHA-256-pinned binary for **Linux or macOS, x86_64 or ARM64** and installs it; it does not build the Rust app. Nix may download its packaging tools/dependencies. Replace `latest/download` with `download/v0.1.0` to pin a release. Install Git separately for checkpoints and sync. These URLs work only after assets are uploaded; the repository's `.nix/release/flake.nix` is a template, not an installable source flake. No Cachix account or token is required. The release flake has its own `.nix/release/flake.lock`, pinned to Nixpkgs 26.05 for Intel macOS support; the development shell stays unchanged.
+Nix builds the app from source unless an exact matching build is available in your configured caches. Dependencies can be downloaded from Nix's standard cache. Linux and macOS, x86_64 and ARM64, are supported. Use `github:The-Terrans/cli-todo/vVERSION` to select a release tag containing the root flake; the bare URL selects the default branch, not the latest release. Install Git separately for checkpoints and sync.
 
-Without Nix, download your platform's `cli-todo-vVERSION-TARGET.tar.gz` from [Releases](https://github.com/The-Terrans/cli-todo/releases), extract it, and put `cli-todo` on your PATH. Linux releases are static musl binaries; SQLite is bundled on every platform. `SHA256SUMS` covers all binary archives and the release flake.
+### Home Manager
+
+Add the input to your existing flake and include `cli-todo` in its `outputs` arguments:
+
+```nix
+inputs.cli-todo.url = "github:The-Terrans/cli-todo";
+```
+
+With that input in scope, register the overlay in your Home Manager modules:
+
+```nix
+nixpkgs.overlays = [ cli-todo.overlays.default ];
+```
+
+Then use the package normally in `home.nix`:
+
+```nix
+home.packages = with pkgs; [ cli-todo ];
+```
+
+If Home Manager uses `useGlobalPkgs`, register the overlay in your NixOS/nix-darwin configuration instead. Alternatively, without an overlay, use `cli-todo.packages.${pkgs.stdenv.hostPlatform.system}.default` in `home.packages`. Your configuration's `flake.lock` pins the input; run `nix flake update cli-todo` and apply Home Manager to upgrade. The overlay builds against your own Nixpkgs; standalone packages use the root lock's Nixpkgs 26.05 pin for Intel macOS compatibility.
+
+## Install a prebuilt release (without Nix)
+
+Download your platform's `cli-todo-vVERSION-TARGET.tar.gz` from [Releases](https://github.com/The-Terrans/cli-todo/releases), extract it, and put `cli-todo` on your PATH. Linux releases are static musl binaries; SQLite is bundled on every platform. `SHA256SUMS` covers all four binary archives. Install Git separately for checkpoints and sync.
 
 ### Publish a release
 
 1. Update the package version in `Cargo.toml` and refresh `Cargo.lock` with `cargo check`.
 2. Commit and push the version and workflow files; tag that commit as `vVERSION` (for example `v0.1.0`).
-3. Publish a GitHub release for that tag. The **Release binaries and Nix flake** workflow tests and builds all four platforms, then attaches the binaries, `cli-todo-flake.tar.gz`, and checksums.
+3. Publish a GitHub release for that tag. The **Release binaries** workflow tests and builds all four platforms, then attaches the binary archives and checksums. Nix users build directly from the repository flake; no generated flake archive is needed.
 
-Tags must match `Cargo.toml` exactly. Draft releases do not build until published. Keep GitHub **immutable releases disabled**: this workflow attaches assets after publication. It uses the repository's built-in `GITHUB_TOKEN` with write access only in the publish job; no extra secret is needed. If Actions permissions are restricted by your organization, allow release asset uploads. Rerunning a successful workflow replaces its assets; prefer a new version rather than changing an existing release because Nix consumers pin hashes.
+Tags must match `Cargo.toml` exactly. Draft releases do not build until published. Keep GitHub **immutable releases disabled**: this workflow attaches assets after publication. It uses the repository's built-in `GITHUB_TOKEN` with write access only in the publish job; no extra secret is needed. If Actions permissions are restricted by your organization, allow release asset uploads. Rerunning a successful workflow replaces its assets; prefer a new version rather than changing an existing release to keep published downloads stable.
 
 ## Develop from source
 
 ```sh
-nix develop path:./.nix
+nix-shell
 cargo run
 ```
 
-If flakes are not enabled, use `nix --extra-experimental-features 'nix-command flakes' develop path:./.nix` instead. The explicit `path:` snapshots only `.nix/`, not the surrounding Git repository. First use downloads dependencies. The flake provides a development shell (not a `nix run` package), with Rust, Cargo, rustfmt, Clippy, pkg-config, and SQLite. Install Git separately for todo checkpoints. `.nix/flake.lock` pins Nix dependencies; `Cargo.lock` pins Rust dependencies.
+`shell.nix` provides rustfmt, Clippy, pkg-config, and SQLite without requiring flakes. Install Rust, Cargo, and Git separately. First use downloads dependencies. The nixpkgs commit in `shell.nix` pins the development tools; `Cargo.lock` pins Rust dependencies. The root `flake.nix` and `flake.lock` are used for packaging, not the development shell.
 
 Without Nix, install Git, a Rust toolchain, pkg-config, and SQLite development libraries, then run `cargo run`. Build without launching with `cargo build`.
 
@@ -177,7 +201,7 @@ Quit before copying the database for backup. Database errors exit with an error 
 
 ## Verify
 
-Inside `nix develop path:./.nix`:
+Inside `nix-shell`:
 
 ```sh
 cargo fmt --check
@@ -191,4 +215,4 @@ Unit tests verify Push/Pull against temporary local Git remotes, including dirty
 
 The optional smoke test requires Python 3 on Unix. It uses a real pseudo-terminal and a temporary database, not your Inbox. It checks multiline descriptions, Tab/Ctrl+S saving, keybindings help, keyboard navigation, command palette search and actions, project creation/rename/deletion, task moves, SQLite checkpoints and persisted Git history, add/edit/complete/delete, confirmed nuke and cancellation, restart persistence, and terminal restoration on normal exit and an injected SQLite error.
 
-Verified in this workspace: Nix shell (Cargo 1.98.0, Rust 1.98.1, SQLite 3.53.3), formatting, unit test, Clippy, build, and PTY smoke test passed.
+Run the checks above to verify your local toolchain and development environment.
