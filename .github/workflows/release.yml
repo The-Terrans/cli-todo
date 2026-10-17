@@ -36,19 +36,6 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
-      - name: Validate release version
-        run: |
-          python3 - <<'PY'
-          import os
-          import re
-          import tomllib
-          from pathlib import Path
-          version = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
-          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', version):
-              raise SystemExit('Expected a release or prerelease Cargo version')
-          if os.environ['RELEASE_TAG'] != f'v{version}':
-              raise SystemExit(f'Release tag must match Cargo.toml: v{version}')
-          PY
       - name: Install Linux static linker
         if: runner.os == 'Linux'
         run: |

@@ -48,10 +48,10 @@ Download your platform's `cli-todo-vVERSION-TARGET.tar.gz` from [Releases](https
 ### Publish a release
 
 1. Update the package version in `Cargo.toml` and refresh `Cargo.lock` with `cargo check`.
-2. Commit and push the version and workflow files; tag that commit as `vVERSION` (for example `v0.1.0`).
+2. Commit and push the version and workflow files; tag that commit (for example `0.1.0` or `v0.1.0`).
 3. Publish a GitHub release for that tag. The **Release binaries** workflow tests and builds all four platforms, then attaches the binary archives and checksums. Nix users build directly from the repository flake; no generated flake archive is needed.
 
-Tags must match `Cargo.toml` exactly. Draft releases do not build until published. Keep GitHub **immutable releases disabled**: this workflow attaches assets after publication. It uses the repository's built-in `GITHUB_TOKEN` with write access only in the publish job; no extra secret is needed. If Actions permissions are restricted by your organization, allow release asset uploads. Rerunning a successful workflow replaces its assets; prefer a new version rather than changing an existing release to keep published downloads stable.
+The workflow does not validate release tags against `Cargo.toml`. Draft releases do not build until published. Keep GitHub **immutable releases disabled**: this workflow attaches assets after publication. It uses the repository's built-in `GITHUB_TOKEN` with write access only in the publish job; no extra secret is needed. If Actions permissions are restricted by your organization, allow release asset uploads. Rerunning a successful workflow replaces its assets; prefer a new version rather than changing an existing release to keep published downloads stable.
 
 ## Develop from source
 
