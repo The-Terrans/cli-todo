@@ -43,7 +43,31 @@ If Home Manager uses `useGlobalPkgs`, register the overlay in your NixOS/nix-dar
 
 ## Install a prebuilt release (without Nix)
 
-Download your platform's `cli-todo-vVERSION-TARGET.tar.gz` from [Releases](https://github.com/The-Terrans/cli-todo/releases), extract it, and put `cli-todo` on your PATH. Linux releases are static musl binaries; SQLite is bundled on every platform. `SHA256SUMS` covers all four binary archives. Install Git separately for checkpoints and sync.
+### Quick install or update
+
+After `install.sh` is pushed, download it and run it:
+
+```sh
+curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/The-Terrans/cli-todo/main/install.sh -o install.sh
+sh install.sh
+```
+
+You can inspect `install.sh` before running it. **Run the same commands again to update** to the latest published non-prerelease version. The script detects Linux/macOS and x86_64/ARM64, verifies the archive against the release's SHA-256 checksum, and atomically replaces `~/.local/bin/cli-todo`. No sudo is needed. Task databases, history, backups, and settings are untouched; restart any running app to use the new binary. A failed download or verification keeps the old binary intact. Checksums detect corruption but are not an independent signature of the publisher.
+
+Choose an exact release tag or custom directory:
+
+```sh
+sh install.sh --version v0.1.0
+sh install.sh --dir "$HOME/bin"
+```
+
+Use the exact tag shown on GitHub (`0.1.0` and `v0.1.0` are different). `--version` can also install an older release; backwards database compatibility is not guaranteed. Use the same `--dir` on future updates, or set `CLI_TODO_INSTALL_DIR`. The script prints a reminder if the directory is missing from PATH or another installation takes precedence. It refuses to overwrite symlinks; update Nix/Home Manager-managed installations through Nix instead. Updates are explicit, not automatic background checks.
+
+Requires `curl`, `tar`, and either `sha256sum` (Linux) or `shasum` (macOS), plus standard shell tools. A release must have finished uploading its binary and `SHA256SUMS` assets.
+
+### Manual download
+
+Download your platform's `cli-todo-TAG-TARGET.tar.gz` from [Releases](https://github.com/The-Terrans/cli-todo/releases), extract it, and put `cli-todo` on your PATH. Linux releases are static musl binaries; SQLite is bundled on every platform. `SHA256SUMS` covers all four binary archives. Install Git separately for checkpoints and sync.
 
 ### Publish a release
 
