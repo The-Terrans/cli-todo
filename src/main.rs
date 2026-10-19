@@ -2,11 +2,16 @@ mod app;
 mod constants;
 mod dates;
 mod db;
+mod editor;
 mod history;
 mod types;
 mod ui;
 
-use crossterm::event::{self, Event};
+use crossterm::{
+    cursor::SetCursorStyle,
+    event::{self, Event},
+    execute,
+};
 use ratatui::DefaultTerminal;
 use std::{env, fs, path::PathBuf, time::Duration};
 use types::{App, Result};
@@ -30,9 +35,23 @@ fn data_directory() -> Result<PathBuf> {
 
 fn run(app: &mut App) -> Result<()> {
     let mut terminal = ratatui::try_init()?;
-    let result = event_loop(&mut terminal, app);
+    let cursor_style = CursorStyle;
+    let result = (|| {
+        execute!(std::io::stdout(), SetCursorStyle::SteadyBlock)?;
+        event_loop(&mut terminal, app)
+    })();
+    drop(cursor_style);
     ratatui::restore();
     result
+}
+
+// Also reset on unwinding; Ratatui's panic hook restores the remaining terminal state.
+struct CursorStyle;
+
+impl Drop for CursorStyle {
+    fn drop(&mut self) {
+        let _ = execute!(std::io::stdout(), SetCursorStyle::DefaultUserShape);
+    }
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {

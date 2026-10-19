@@ -24,7 +24,10 @@ with tempfile.TemporaryDirectory() as data:
         with sqlite3.connect(dbpath) as db:
             return db.execute("SELECT description FROM tasks ORDER BY id").fetchall()
 
+    captured = []
+
     def launch():
+        captured.clear()
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
         before = termios.tcgetattr(slave)
@@ -40,6 +43,7 @@ with tempfile.TemporaryDirectory() as data:
         out = b""
         while select.select([master], [], [], 0.1)[0]:
             out += os.read(master, 65536)
+        captured.append(out)
         return b" ".join(re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b" ", out).split())
 
     def send(keys):
@@ -49,6 +53,9 @@ with tempfile.TemporaryDirectory() as data:
     def finish(expected):
         assert proc.wait(timeout=3) == expected
         assert termios.tcgetattr(slave) == before, "terminal attributes not restored"
+        output = b"".join(captured)
+        assert b"\x1b[2 q" in output, "steady native block cursor was not requested"
+        assert b"\x1b[0 q" in output, "terminal default cursor style was not restored"
         os.close(master)
         os.close(slave)
 
@@ -68,7 +75,9 @@ with tempfile.TemporaryDirectory() as data:
         assert proc.poll() is None, "help should not execute browsing shortcuts"
         send(b"\x1b")
         assert rows() == []
+        assert b"\x1b[?25l" in b"".join(captured), "browsing must hide the native cursor"
         assert b"Title cannot be empty" in send(b"a\r")
+        assert b"\x1b[?25h" in captured[-1], "editing must show the native cursor"
         send(b"first\r")
         assert rows() == [("first", 0)]
         send(b"\t ")
@@ -80,7 +89,9 @@ with tempfile.TemporaryDirectory() as data:
         send(b"\t")
         send(b"aabandoned\x1b")
         assert len(rows()) == 1
-        send(b"\rr!\tdescription first\rsecond line\x13")
+        # Replace characters in-place in Title and the preceding Description line.
+        send(b"\rr!\x1b[H\x1b[C\x1b[3~i\tdescription first\rsecond line"
+             b"\x1b[H\x1b[A\x1b[C\x1b[3~e\x13")
         assert rows() == [("first!", 0)]
         assert descriptions() == [("description first\nsecond line",)]
         send(b" ")

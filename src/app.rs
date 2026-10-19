@@ -37,6 +37,7 @@ impl App {
             task_path: vec![],
             new_task_parent: None,
             viewport: ratatui::layout::Rect::new(0, 0, 80, 24),
+            input_cursor: crate::editor::TextCursor::default(),
             navigation_focused: true,
             selected_filter: 0,
             mode: Mode::Browse,
@@ -342,6 +343,13 @@ impl App {
         if key == KeyCode::Char('q') && matches!(self.mode, Mode::Browse) {
             return self.execute_action(Action::Quit);
         }
+        if let Mode::ProjectEdit(_, text) | Mode::CommitEdit(text) | Mode::RemoteEdit(text) =
+            &mut self.mode
+        {
+            if self.input_cursor.handle(text, key, false) {
+                return Ok(false);
+            }
+        }
         match self.mode {
             Mode::Browse => self.handle_browse_key(key)?,
             Mode::Help { .. } => self.handle_help_key(key),
@@ -548,6 +556,7 @@ impl App {
             return;
         }
         if self.uncommitted_changes {
+            self.input_cursor = crate::editor::TextCursor::default();
             self.mode = Mode::CommitEdit(String::new());
         } else {
             self.mode = Mode::NoChanges;
@@ -636,19 +645,13 @@ impl App {
             return;
         }
         self.load_remote();
+        self.input_cursor = crate::editor::TextCursor::default();
         self.mode = Mode::RemoteEdit(self.remote_url.clone());
     }
 
     fn handle_remote_edit_key(&mut self, key: KeyCode) {
-        let Mode::RemoteEdit(text) = &mut self.mode else {
-            return;
-        };
         match key {
             KeyCode::Esc => self.mode = Mode::Browse,
-            KeyCode::Backspace => {
-                text.pop();
-            }
-            KeyCode::Char(character) => text.push(character),
             KeyCode::Enter => self.save_remote(),
             _ => {}
         }
@@ -767,15 +770,8 @@ impl App {
     }
 
     fn handle_commit_edit_key(&mut self, key: KeyCode) -> Result<()> {
-        let Mode::CommitEdit(text) = &mut self.mode else {
-            return Ok(());
-        };
         match key {
             KeyCode::Esc => self.mode = Mode::Browse,
-            KeyCode::Backspace => {
-                text.pop();
-            }
-            KeyCode::Char(character) => text.push(character),
             KeyCode::Enter => self.save_commit(),
             _ => {}
         }
@@ -1071,50 +1067,38 @@ impl App {
                     TaskField::DueDate => TaskField::Description,
                 }
             }
-            KeyCode::Enter if draft.focus == TaskField::Description => {
-                draft.description.push('\n');
-                Self::update_auto_date(draft);
-            }
-            KeyCode::Enter => self.save_edit()?,
-            KeyCode::Char(character) => {
-                if draft.focus == TaskField::Description {
-                    draft.description.push(character);
-                } else if draft.focus == TaskField::DueDate {
-                    Self::dismiss_auto_date(draft, false);
-                    draft.due_date.push(character);
+            KeyCode::Enter if draft.focus != TaskField::Description => self.save_edit()?,
+            _ => {
+                let key = if key == KeyCode::Enter {
+                    KeyCode::Char('\n')
                 } else {
-                    draft.title.push(character);
-                }
-                if draft.focus != TaskField::DueDate {
-                    Self::update_auto_date(draft);
-                }
-            }
-            KeyCode::Backspace => {
-                let position = if draft.focus == TaskField::Description {
-                    draft.description.len()
-                } else {
-                    draft.title.len()
+                    key
                 };
-                if draft.auto_date.as_ref().is_some_and(|auto| {
-                    auto.field == draft.focus
-                        && position > auto.phrase.range.start
-                        && position <= auto.phrase.range.end
-                }) {
-                    Self::dismiss_auto_date(draft, true);
+                let deleting = matches!(key, KeyCode::Backspace | KeyCode::Delete);
+                let changing = deleting || matches!(key, KeyCode::Char(_));
+                if deleting {
+                    let text = draft.field_text(draft.focus);
+                    let range = draft.cursors[draft.focus as usize].deletion_range(text, key);
+                    if draft.auto_date.as_ref().is_some_and(|auto| {
+                        auto.field == draft.focus
+                            && range.start < auto.phrase.range.end
+                            && range.end > auto.phrase.range.start
+                    }) {
+                        Self::dismiss_auto_date(draft, true);
+                    }
                 }
-                if draft.focus == TaskField::Description {
-                    draft.description.pop();
-                } else if draft.focus == TaskField::DueDate {
+                if changing && draft.focus == TaskField::DueDate {
                     Self::dismiss_auto_date(draft, false);
-                    draft.due_date.pop();
-                } else {
-                    draft.title.pop();
                 }
-                if draft.focus != TaskField::DueDate {
-                    Self::refresh_auto_date(draft, false);
+                draft.edit_focused(key);
+                if changing && draft.focus != TaskField::DueDate {
+                    if deleting {
+                        Self::refresh_auto_date(draft, false);
+                    } else {
+                        Self::update_auto_date(draft);
+                    }
                 }
             }
-            _ => {}
         }
         Ok(())
     }
@@ -1131,6 +1115,7 @@ impl App {
                 .push((auto.field, text[auto.phrase.range].to_ascii_lowercase()));
             if clear {
                 draft.due_date.clear();
+                draft.cursors[TaskField::DueDate as usize] = Default::default();
             }
         }
     }
@@ -1184,9 +1169,14 @@ impl App {
             .map(|(auto, _)| auto);
         if let Some(auto) = &mut next {
             auto.previous_due_date = previous;
-            draft.due_date = auto.phrase.date.to_string();
+            let due_date = auto.phrase.date.to_string();
+            if draft.due_date != due_date {
+                draft.cursors[TaskField::DueDate as usize] = Default::default();
+                draft.due_date = due_date;
+            }
         } else if let Some(auto) = &draft.auto_date {
             draft.due_date = auto.previous_due_date.clone();
+            draft.cursors[TaskField::DueDate as usize] = Default::default();
         }
         draft.auto_date = next;
     }
@@ -1271,9 +1261,13 @@ impl App {
                 self.selected_project = self.selected_project.saturating_sub(1);
                 self.preview_project()?;
             }
-            KeyCode::Char('a') => self.mode = Mode::ProjectEdit(None, String::new()),
+            KeyCode::Char('a') => {
+                self.input_cursor = crate::editor::TextCursor::default();
+                self.mode = Mode::ProjectEdit(None, String::new());
+            }
             KeyCode::Char('e') => {
                 if let Some(project) = self.projects.get(self.selected_project) {
+                    self.input_cursor = crate::editor::TextCursor::default();
                     self.mode = Mode::ProjectEdit(Some(project.id), project.name.clone());
                 }
             }
@@ -1295,15 +1289,8 @@ impl App {
     }
 
     fn handle_project_edit_key(&mut self, key: KeyCode) -> Result<()> {
-        let Mode::ProjectEdit(_, text) = &mut self.mode else {
-            return Ok(());
-        };
         match key {
             KeyCode::Esc => self.mode = Mode::Browse,
-            KeyCode::Backspace => {
-                text.pop();
-            }
-            KeyCode::Char(character) => text.push(character),
             KeyCode::Enter => self.save_project_edit()?,
             _ => {}
         }
@@ -1381,3 +1368,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/reset_history.rs"]
 mod reset_history_tests;
+
+#[cfg(test)]
+#[path = "tests/editor.rs"]
+mod editor_tests;

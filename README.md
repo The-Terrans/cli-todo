@@ -117,14 +117,17 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Enter in text entry          | Save title; in task Description, insert newline           |
 | Tab / Shift+Tab in editor    | Cycle Title / Description / Due date                      |
 | Ctrl+S outside Title         | Save the current task editor                              |
-| Backspace in text entry      | Remove last character                                    |
+| Left / Right in editors      | Move the cursor; typing inserts at its position           |
+| Up / Down in Description     | Move between explicit newline-separated lines             |
+| Home / End in editors        | Move to the beginning/end of the current line             |
+| Backspace / Delete in editors | Delete the character before/after the cursor             |
 | Esc in text entry            | Discard changes                                          |
 | q while browsing             | Quit                                                     |
 | Ctrl+K while browsing        | Open searchable command palette                          |
 
 All deletion confirmations use only **Enter** to confirm and **Esc** to cancel; y/n and q do nothing in these dialogs.
 
-Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Editing is intentionally append/backspace only. Project input dialogs use 3 rows and 70% of the terminal width (minimum 60 columns, reduced to fit smaller terminals), with Enter/Esc in the bottom border; errors add one row. Long title input scrolls horizontally to keep its end visible. Long titles remain stored but may be clipped in the task list. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
+Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Input dialogs support Left/Right, Home/End, insertion, Backspace, and Delete. Search retains its existing append/backspace input and arrow selection. Project input dialogs use 3 rows and 70% of the terminal width (minimum 60 columns, reduced to fit smaller terminals), with Enter/Esc in the bottom border; errors add one row. Long title input scrolls horizontally to keep the cursor visible. Long titles remain stored but may be clipped in the task list. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
 
 ## Opened tasks
 
@@ -140,7 +143,7 @@ Press **Enter** on a task to replace the right-hand list with its title, descrip
 
 **a** creates a task and **r** rewords one using the same three-field popup: **Title**, **Description**, and **Due date** only. Subtasks are managed in the right panel, not inside the popup. The popup uses 70% of the terminal width (minimum 60 columns) and 70% of its height (minimum 15 rows), centered and reduced to fit small terminals. Title and Due date stay compact; Description takes the remaining height. Title is focused initially: **Enter** saves and **Esc** cancels. **Tab** cycles Title → Description → Due date → Title; **Shift+Tab** cycles backward. Description's top-right border shows the focus hint. Rewording preserves existing subtasks and their details.
 
-In Description, **Enter** inserts a newline and **Ctrl+S** saves the entire task. **Esc** cancels all draft changes. Only the focused field shows its save/cancel footer and cursor. Description text wraps and scrolls to keep the input end visible. Editing remains append/backspace only; descriptions are optional and preserve whitespace.
+In Description, **Enter** inserts a newline and **Ctrl+S** saves the entire task. **Esc** cancels all draft changes. Only the focused field shows its save/cancel footer and cursor. Description text wraps and scrolls to keep the cursor visible. **Left/Right** moves through text; **Up/Down** moves between explicit newline-separated lines, not soft-wrapped display rows, preserving the horizontal position where possible. **Home/End** moves to the current line's edges. Typing and Enter insert at the cursor; **Backspace/Delete** removes the character before/after it. Each field starts at its text end and remembers its cursor when switching with Tab/Shift+Tab. Editors and command-palette search use a solid native terminal block cursor, not an inserted glyph: moving it does not push letters or change word wrapping. The viewport scrolls only when needed to keep the cursor visible. Browsing hides it; exiting resets the cursor style to the terminal default. Cursor appearance depends on terminal support. Descriptions are optional and preserve whitespace.
 
 The task list shows the first nonblank description line beneath its title, indented in dim dark gray. An ellipsis indicates additional lines; press Enter for full details, or r to reword. Empty descriptions take no extra row. Terminal font size is fixed, so subdued styling provides the visual hierarchy.
 
@@ -159,7 +162,7 @@ While typing, recognized English date phrases in **Title or Description** are hi
 
 For example, `do chores tomorrow` saves as `do chores` with tomorrow's deadline. Matching uses whole words and is case-insensitive; invalid dates stay as ordinary text. The first non-dismissed phrase wins, checking Title before Description. Saving a date-only title is refused without discarding your draft.
 
-**Esc** clears an active automatic date and its highlight, leaves the keyword as normal text, and keeps the popup open. Esc again cancels the popup. **Backspace at the keyword** deletes a character and clears the automatic date/highlight; deleting unrelated text keeps the guess. Backspace never creates a new guess from a shortened alias. Dismissed keywords stay normal text for the current edit and are not stripped on save. Clearing a guess leaves Due date blank, not its old manual value. Editing Due date manually also dismisses detection without erasing your manual input. Ordinary words such as `tomatoes` do not replace a manual date once typing is complete.
+**Esc** clears an active automatic date and its highlight, leaves the keyword as normal text, and keeps the popup open. Esc again cancels the popup. **Backspace/Delete at the keyword** deletes a character and clears the automatic date/highlight; deleting unrelated text keeps the guess. Neither deletion key creates a new guess from a shortened alias. Moving the cursor does not change automatic dates. Dismissed keywords stay normal text for the current edit and are not stripped on save. Clearing a guess leaves Due date blank, not its old manual value. Editing Due date manually also dismisses detection without erasing your manual input. Ordinary words such as `tomatoes` do not replace a manual date once typing is complete.
 
 Tasks and subtasks have independent deadlines. Titles show a `[due: YYYY-MM-DD]` badge without changing task order. Unfinished tasks due **before today in your local timezone** have red badges; dates due today are not overdue, and completed tasks use muted badges. Deadlines persist in SQLite and Git snapshots; older databases/snapshots get no deadline automatically.
 
