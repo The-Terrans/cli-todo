@@ -1,3 +1,11 @@
+#[path = "editor_render.rs"]
+mod editor_render;
+use editor_render::{set_cursor, set_input_cursor, task_field_text, wrapped_cursor};
+
+#[cfg(test)]
+#[path = "tests/editor_render.rs"]
+mod editor_render_tests;
+
 use crate::{
     constants::{FILTERS, KEYBINDINGS},
     dates::is_overdue,
@@ -425,6 +433,7 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
                 frame,
                 " Todo remote (blank removes origin) ",
                 text,
+                &app.input_cursor,
                 &app.message,
                 "save",
             );
@@ -434,6 +443,7 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
                 frame,
                 " Commit todo snapshot ",
                 text,
+                &app.input_cursor,
                 &app.message,
                 "commit",
             );
@@ -447,12 +457,14 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
                     " Add project "
                 },
                 text,
+                &app.input_cursor,
                 &app.message,
                 "save",
             );
         }
         Mode::NoChanges => return draw_no_changes_dialog(frame),
         Mode::Nuke { .. } => return draw_nuke_dialog(frame, app),
+        Mode::ResetHistory { .. } => return draw_reset_history_dialog(frame, app),
         Mode::ProjectDelete(_) => (
             " Delete project AND its tasks? ",
             "All tasks in this project will be permanently deleted.\nEnter: confirm · Esc: cancel"
@@ -482,50 +494,6 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(text).block(panel(title, true)), area);
 }
 
-fn task_field_text(draft: &TaskDraft, field: TaskField, focused: bool) -> Text<'static> {
-    let text = if field == TaskField::Title {
-        &draft.title
-    } else {
-        &draft.description
-    };
-    let range = draft
-        .auto_date
-        .as_ref()
-        .filter(|auto| auto.field == field)
-        .map(|auto| &auto.phrase.range);
-    let mut offset = 0;
-    let mut lines = Vec::new();
-    for line in text.split('\n') {
-        let mut spans = Vec::new();
-        let start = range
-            .map(|range| range.start.saturating_sub(offset).min(line.len()))
-            .unwrap_or(0);
-        let end = range
-            .map(|range| range.end.saturating_sub(offset).min(line.len()))
-            .unwrap_or(0);
-        if start < end {
-            spans.push(Span::raw(line[..start].to_owned()));
-            spans.push(Span::styled(
-                line[start..end].to_owned(),
-                Style::default()
-                    .fg(Color::LightYellow)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            ));
-            spans.push(Span::raw(line[end..].to_owned()));
-        } else {
-            spans.push(Span::raw(line.to_owned()));
-        }
-        lines.push(Line::from(spans));
-        offset += line.len() + 1;
-    }
-    if focused {
-        if let Some(line) = lines.last_mut() {
-            line.spans.push(Span::raw("▏"));
-        }
-    }
-    Text::from(lines)
-}
-
 fn draw_task_editor(
     frame: &mut Frame,
     editing: bool,
@@ -537,18 +505,19 @@ fn draw_task_editor(
     let description_focused = draft.focus == TaskField::Description;
     let due_focused = draft.focus == TaskField::DueDate;
     let area = task_editor_area(frame.area());
+    let error_height = if message.is_empty() {
+        0
+    } else {
+        Paragraph::new(message)
+            .wrap(Wrap { trim: false })
+            .line_count(area.width.saturating_sub(2))
+            .max(1)
+            .min(area.height.saturating_sub(9).max(1) as usize) as u16
+    };
     let rows = Layout::vertical([
-        Constraint::Length(if message.is_empty() || due_focused {
-            3
-        } else {
-            4
-        }),
+        Constraint::Length(3 + if due_focused { 0 } else { error_height }),
         Constraint::Fill(1),
-        Constraint::Length(if !message.is_empty() && due_focused {
-            4
-        } else {
-            3
-        }),
+        Constraint::Length(3 + if due_focused { error_height } else { 0 }),
     ])
     .split(area);
     let hint = Style::default()
@@ -557,9 +526,9 @@ fn draw_task_editor(
         .remove_modifier(Modifier::BOLD);
     let mut title = panel(
         match (editing, subtask) {
-            (true, true) => " Reword subtask: Title ",
+            (true, true) => " Edit subtask: Title ",
             (false, true) => " Add subtask: Title ",
-            (true, false) => " Reword task: Title ",
+            (true, false) => " Edit task: Title ",
             (false, false) => " Add task: Title ",
         },
         title_focused,
@@ -575,11 +544,9 @@ fn draw_task_editor(
         );
     }
     let title_inner = title.inner(rows[0]);
-    let title_text = task_field_text(draft, TaskField::Title, title_focused);
-    let horizontal = title_text
-        .width()
-        .saturating_sub(title_inner.width as usize)
-        .min(u16::MAX as usize) as u16;
+    let title_text = task_field_text(draft, TaskField::Title);
+    let horizontal =
+        draft.cursors[TaskField::Title as usize].horizontal_scroll(&draft.title, title_inner.width);
     let mut description = panel(" Description ", description_focused).title(
         Line::styled(
             " Press <tab> to toggle focus ",
@@ -597,13 +564,19 @@ fn draw_task_editor(
         );
     }
     let description_inner = description.inner(rows[1]);
-    let text = task_field_text(draft, TaskField::Description, description_focused);
+    let text = task_field_text(draft, TaskField::Description);
+    let (cursor_column, cursor_row) = if description_focused {
+        wrapped_cursor(draft, description_inner.width)
+    } else {
+        (0, 0)
+    };
     let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
     let vertical = if description_focused {
-        paragraph
-            .line_count(description_inner.width)
-            .saturating_sub(description_inner.height as usize)
-            .min(u16::MAX as usize) as u16
+        draft.cursors[TaskField::Description as usize].vertical_scroll(
+            cursor_row,
+            description_inner.height,
+            paragraph.line_count(description_inner.width).max(1),
+        )
     } else {
         0
     };
@@ -618,17 +591,34 @@ fn draw_task_editor(
     );
     if !message.is_empty() && !due_focused && title_inner.height > 1 {
         frame.render_widget(
-            Paragraph::new(message.lines().next().unwrap_or(""))
+            Paragraph::new(message)
+                .wrap(Wrap { trim: false })
                 .style(Style::default().fg(Color::LightRed)),
             Rect {
                 y: title_inner.y + 1,
-                height: 1,
+                height: title_inner.height.saturating_sub(1),
                 ..title_inner
             },
         );
     }
     frame.render_widget(description, rows[1]);
     frame.render_widget(paragraph.scroll((vertical, 0)), description_inner);
+    if title_focused {
+        set_input_cursor(
+            frame,
+            title_inner,
+            &draft.cursors[TaskField::Title as usize],
+            &draft.title,
+            horizontal,
+        );
+    } else if description_focused {
+        set_cursor(
+            frame,
+            description_inner,
+            cursor_column,
+            cursor_row.saturating_sub(vertical as usize),
+        );
+    }
     draw_due_date(
         frame,
         rows[2],
@@ -657,17 +647,13 @@ fn draw_due_date(frame: &mut Frame, area: Rect, draft: &TaskDraft, message: &str
         );
     }
     let inner = block.inner(area);
-    let text = Line::raw(if focused {
-        format!("{}▏", draft.due_date)
-    } else if draft.due_date.is_empty() {
+    let text = Line::raw(if !focused && draft.due_date.is_empty() {
         "No due date".into()
     } else {
         draft.due_date.clone()
     });
-    let horizontal = text
-        .width()
-        .saturating_sub(inner.width as usize)
-        .min(u16::MAX as usize) as u16;
+    let horizontal =
+        draft.cursors[TaskField::DueDate as usize].horizontal_scroll(&draft.due_date, inner.width);
     frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(text).scroll((0, horizontal)),
@@ -676,12 +662,23 @@ fn draw_due_date(frame: &mut Frame, area: Rect, draft: &TaskDraft, message: &str
             ..inner
         },
     );
+    if focused {
+        set_input_cursor(
+            frame,
+            inner,
+            &draft.cursors[TaskField::DueDate as usize],
+            &draft.due_date,
+            horizontal,
+        );
+    }
     if !message.is_empty() && inner.height > 1 {
         frame.render_widget(
-            Paragraph::new(message).style(Style::default().fg(Color::LightRed)),
+            Paragraph::new(message)
+                .wrap(Wrap { trim: false })
+                .style(Style::default().fg(Color::LightRed)),
             Rect {
                 y: inner.y + 1,
-                height: 1,
+                height: inner.height.saturating_sub(1),
                 ..inner
             },
         );
@@ -735,7 +732,14 @@ fn subtask_count_label(count: usize) -> String {
     }
 }
 
-fn draw_input_dialog(frame: &mut Frame, title: &str, text: &str, message: &str, submit: &str) {
+fn draw_input_dialog(
+    frame: &mut Frame,
+    title: &str,
+    text: &str,
+    cursor: &crate::editor::TextCursor,
+    message: &str,
+    submit: &str,
+) {
     let area = input_dialog_area(frame.area(), if message.is_empty() { 3 } else { 4 });
     let block = panel(title, true).title_bottom(
         Line::styled(
@@ -748,11 +752,8 @@ fn draw_input_dialog(frame: &mut Frame, title: &str, text: &str, message: &str, 
         .alignment(Alignment::Right),
     );
     let inner = block.inner(area);
-    let input = Line::raw(format!("{text}▏"));
-    let scroll = input
-        .width()
-        .saturating_sub(inner.width as usize)
-        .min(u16::MAX as usize) as u16;
+    let input = Line::raw(text);
+    let scroll = cursor.horizontal_scroll(text, inner.width);
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
     frame.render_widget(
@@ -762,6 +763,7 @@ fn draw_input_dialog(frame: &mut Frame, title: &str, text: &str, message: &str, 
             ..inner
         },
     );
+    set_input_cursor(frame, inner, cursor, text, scroll);
     if !message.is_empty() && inner.height > 1 {
         frame.render_widget(
             Paragraph::new(message.lines().next().unwrap_or(""))
@@ -875,6 +877,42 @@ fn draw_nuke_dialog(frame: &mut Frame, app: &App) {
     );
 }
 
+fn draw_reset_history_dialog(frame: &mut Frame, app: &App) {
+    let Mode::ResetHistory { commits } = app.mode else {
+        return;
+    };
+    let mut lines = vec![
+        Line::styled(
+            format!("Permanently delete {commits} local commits + remote settings?"),
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::raw("All todos, subtasks, projects and existing backups are kept."),
+        Line::raw("Remote repository is untouched. No new backup is created."),
+    ];
+    if !app.message.is_empty() {
+        lines.push(Line::styled(
+            app.message.lines().next().unwrap_or(""),
+            Style::default().fg(Color::LightRed),
+        ));
+    }
+    let area = dialog_area(frame.area(), lines.len() as u16 + 2);
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            panel(" Reset todo history ", true).title_bottom(
+                Line::styled(
+                    "──Enter: confirm ── Esc: cancel ──",
+                    Style::default().fg(Color::LightYellow).bg(Color::Reset),
+                )
+                .alignment(Alignment::Right),
+            ),
+        ),
+        area,
+    );
+}
+
 fn draw_move_dialog(frame: &mut Frame, app: &App) {
     let Mode::Move { selected, .. } = &app.mode else {
         return;
@@ -910,10 +948,11 @@ fn draw_palette(frame: &mut Frame, app: &App) {
     .split(block.inner(area));
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
-    frame.render_widget(
-        Paragraph::new(format!("Search tasks/actions: {query}▏")),
-        rows[0],
-    );
+    let search = format!("Search tasks/actions: {query}");
+    let cursor = crate::editor::TextCursor::default();
+    let scroll = cursor.horizontal_scroll(&search, rows[0].width);
+    frame.render_widget(Paragraph::new(search.as_str()).scroll((0, scroll)), rows[0]);
+    set_input_cursor(frame, rows[0], &cursor, &search, scroll);
 
     let actions = app.palette_results();
     if actions.is_empty() {

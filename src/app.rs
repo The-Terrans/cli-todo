@@ -37,6 +37,7 @@ impl App {
             task_path: vec![],
             new_task_parent: None,
             viewport: ratatui::layout::Rect::new(0, 0, 80, 24),
+            input_cursor: crate::editor::TextCursor::default(),
             navigation_focused: true,
             selected_filter: 0,
             mode: Mode::Browse,
@@ -237,9 +238,7 @@ impl App {
         };
         let (maximum, page) = crate::ui::task_detail_scroll_bounds(view, self.viewport);
         match key {
-            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab
-                if !view.children.is_empty() =>
-            {
+            KeyCode::Left | KeyCode::Right if !view.children.is_empty() => {
                 view.focus = match view.focus {
                     TaskPane::Details => TaskPane::Subtasks,
                     TaskPane::Subtasks => TaskPane::Details,
@@ -281,7 +280,7 @@ impl App {
                 db::toggle_task(&self.db, id)?;
                 self.refresh_tasks()?;
             }
-            KeyCode::Enter | KeyCode::Char('r') => {
+            KeyCode::Enter | KeyCode::Char('e') => {
                 self.execute_action(Action::Edit)?;
             }
             KeyCode::Char('d') => {
@@ -344,12 +343,20 @@ impl App {
         if key == KeyCode::Char('q') && matches!(self.mode, Mode::Browse) {
             return self.execute_action(Action::Quit);
         }
+        if let Mode::ProjectEdit(_, text) | Mode::CommitEdit(text) | Mode::RemoteEdit(text) =
+            &mut self.mode
+        {
+            if self.input_cursor.handle(text, key, false) {
+                return Ok(false);
+            }
+        }
         match self.mode {
             Mode::Browse => self.handle_browse_key(key)?,
             Mode::Help { .. } => self.handle_help_key(key),
             Mode::Edit(..) => self.handle_edit_key(key)?,
             Mode::Delete(id) => self.handle_delete_key(key, id)?,
             Mode::Nuke { .. } => self.handle_nuke_key(key)?,
+            Mode::ResetHistory { .. } => self.handle_reset_history_key(key),
             Mode::Palette { .. } => return self.handle_palette_key(key),
             Mode::ProjectEdit(..) => self.handle_project_edit_key(key)?,
             Mode::ProjectDelete(id) => self.handle_project_delete_key(key, id)?,
@@ -370,6 +377,9 @@ impl App {
             KeyCode::Char('?') => self.mode = Mode::Help { scroll: 0 },
             KeyCode::Char('c') => self.begin_commit(),
             KeyCode::Char('D') => self.begin_nuke()?,
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.navigation_focused = !self.navigation_focused;
+            }
             KeyCode::Char('0') => self.navigation_focused = false,
             KeyCode::Char('1') => self.focus_inbox()?,
             KeyCode::Left | KeyCode::Right if self.navigation_focused => self.cycle_section(key)?,
@@ -441,6 +451,42 @@ impl App {
         Ok(())
     }
 
+    fn begin_reset_history(&mut self) {
+        if self.sync_receiver.is_some() {
+            self.message = "Wait for sync to finish before resetting todo history".into();
+            return;
+        }
+        self.mode = Mode::ResetHistory {
+            commits: self.commits.len(),
+        };
+    }
+
+    fn handle_reset_history_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Enter => {
+                if self.sync_receiver.is_some() {
+                    self.message = "Wait for sync to finish before resetting todo history".into();
+                    return;
+                }
+                let result = self.history.as_ref().map_or(Ok(()), History::reset);
+                self.reload_commits();
+                self.load_remote();
+                self.update_commit_status();
+                match result {
+                    Ok(()) => {
+                        self.mode = Mode::Browse;
+                        self.message = "Local history and remote settings deleted. Todos kept. No backup created.".into();
+                    }
+                    Err(error) => {
+                        self.message = format!("Could not reset todo history: {error}");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn focus_inbox(&mut self) -> Result<()> {
         self.clear_task_view();
         self.navigation_focused = true;
@@ -510,6 +556,7 @@ impl App {
             return;
         }
         if self.uncommitted_changes {
+            self.input_cursor = crate::editor::TextCursor::default();
             self.mode = Mode::CommitEdit(String::new());
         } else {
             self.mode = Mode::NoChanges;
@@ -598,19 +645,13 @@ impl App {
             return;
         }
         self.load_remote();
+        self.input_cursor = crate::editor::TextCursor::default();
         self.mode = Mode::RemoteEdit(self.remote_url.clone());
     }
 
     fn handle_remote_edit_key(&mut self, key: KeyCode) {
-        let Mode::RemoteEdit(text) = &mut self.mode else {
-            return;
-        };
         match key {
             KeyCode::Esc => self.mode = Mode::Browse,
-            KeyCode::Backspace => {
-                text.pop();
-            }
-            KeyCode::Char(character) => text.push(character),
             KeyCode::Enter => self.save_remote(),
             _ => {}
         }
@@ -729,15 +770,8 @@ impl App {
     }
 
     fn handle_commit_edit_key(&mut self, key: KeyCode) -> Result<()> {
-        let Mode::CommitEdit(text) = &mut self.mode else {
-            return Ok(());
-        };
         match key {
             KeyCode::Esc => self.mode = Mode::Browse,
-            KeyCode::Backspace => {
-                text.pop();
-            }
-            KeyCode::Char(character) => text.push(character),
             KeyCode::Enter => self.save_commit(),
             _ => {}
         }
@@ -818,7 +852,7 @@ impl App {
                 }
                 return Ok(());
             }
-            KeyCode::Char('r') => Action::Edit,
+            KeyCode::Char('e') => Action::Edit,
             KeyCode::Char('d') => Action::Delete,
             KeyCode::Char('m') => Action::Move,
             KeyCode::Char(' ') => Action::ToggleCompletion,
@@ -915,6 +949,7 @@ impl App {
                 self.open_task(id, false)?;
                 self.navigation_focused = false;
             }
+            Action::ResetHistory => self.begin_reset_history(),
             Action::Quit => return Ok(true),
         }
         Ok(false)
@@ -945,7 +980,11 @@ impl App {
             .iter()
             .copied()
             .filter(|(label, action)| {
-                (has_task || matches!(action, Action::Add | Action::ShowFilter(_) | Action::Quit))
+                (has_task
+                    || matches!(
+                        action,
+                        Action::Add | Action::ShowFilter(_) | Action::ResetHistory | Action::Quit
+                    ))
                     && label.to_lowercase().contains(&query)
             })
             .collect()
@@ -1028,50 +1067,38 @@ impl App {
                     TaskField::DueDate => TaskField::Description,
                 }
             }
-            KeyCode::Enter if draft.focus == TaskField::Description => {
-                draft.description.push('\n');
-                Self::update_auto_date(draft);
-            }
-            KeyCode::Enter => self.save_edit()?,
-            KeyCode::Char(character) => {
-                if draft.focus == TaskField::Description {
-                    draft.description.push(character);
-                } else if draft.focus == TaskField::DueDate {
-                    Self::dismiss_auto_date(draft, false);
-                    draft.due_date.push(character);
+            KeyCode::Enter if draft.focus != TaskField::Description => self.save_edit()?,
+            _ => {
+                let key = if key == KeyCode::Enter {
+                    KeyCode::Char('\n')
                 } else {
-                    draft.title.push(character);
-                }
-                if draft.focus != TaskField::DueDate {
-                    Self::update_auto_date(draft);
-                }
-            }
-            KeyCode::Backspace => {
-                let position = if draft.focus == TaskField::Description {
-                    draft.description.len()
-                } else {
-                    draft.title.len()
+                    key
                 };
-                if draft.auto_date.as_ref().is_some_and(|auto| {
-                    auto.field == draft.focus
-                        && position > auto.phrase.range.start
-                        && position <= auto.phrase.range.end
-                }) {
-                    Self::dismiss_auto_date(draft, true);
+                let deleting = matches!(key, KeyCode::Backspace | KeyCode::Delete);
+                let changing = deleting || matches!(key, KeyCode::Char(_));
+                if deleting {
+                    let text = draft.field_text(draft.focus);
+                    let range = draft.cursors[draft.focus as usize].deletion_range(text, key);
+                    if draft.auto_date.as_ref().is_some_and(|auto| {
+                        auto.field == draft.focus
+                            && range.start < auto.phrase.range.end
+                            && range.end > auto.phrase.range.start
+                    }) {
+                        Self::dismiss_auto_date(draft, true);
+                    }
                 }
-                if draft.focus == TaskField::Description {
-                    draft.description.pop();
-                } else if draft.focus == TaskField::DueDate {
+                if changing && draft.focus == TaskField::DueDate {
                     Self::dismiss_auto_date(draft, false);
-                    draft.due_date.pop();
-                } else {
-                    draft.title.pop();
                 }
-                if draft.focus != TaskField::DueDate {
-                    Self::refresh_auto_date(draft, false);
+                draft.edit_focused(key);
+                if changing && draft.focus != TaskField::DueDate {
+                    if deleting {
+                        Self::refresh_auto_date(draft, false);
+                    } else {
+                        Self::update_auto_date(draft);
+                    }
                 }
             }
-            _ => {}
         }
         Ok(())
     }
@@ -1088,6 +1115,7 @@ impl App {
                 .push((auto.field, text[auto.phrase.range].to_ascii_lowercase()));
             if clear {
                 draft.due_date.clear();
+                draft.cursors[TaskField::DueDate as usize] = Default::default();
             }
         }
     }
@@ -1141,9 +1169,14 @@ impl App {
             .map(|(auto, _)| auto);
         if let Some(auto) = &mut next {
             auto.previous_due_date = previous;
-            draft.due_date = auto.phrase.date.to_string();
+            let due_date = auto.phrase.date.to_string();
+            if draft.due_date != due_date {
+                draft.cursors[TaskField::DueDate as usize] = Default::default();
+                draft.due_date = due_date;
+            }
         } else if let Some(auto) = &draft.auto_date {
             draft.due_date = auto.previous_due_date.clone();
+            draft.cursors[TaskField::DueDate as usize] = Default::default();
         }
         draft.auto_date = next;
     }
@@ -1228,9 +1261,13 @@ impl App {
                 self.selected_project = self.selected_project.saturating_sub(1);
                 self.preview_project()?;
             }
-            KeyCode::Char('a') => self.mode = Mode::ProjectEdit(None, String::new()),
+            KeyCode::Char('a') => {
+                self.input_cursor = crate::editor::TextCursor::default();
+                self.mode = Mode::ProjectEdit(None, String::new());
+            }
             KeyCode::Char('e') => {
                 if let Some(project) = self.projects.get(self.selected_project) {
+                    self.input_cursor = crate::editor::TextCursor::default();
                     self.mode = Mode::ProjectEdit(Some(project.id), project.name.clone());
                 }
             }
@@ -1252,15 +1289,8 @@ impl App {
     }
 
     fn handle_project_edit_key(&mut self, key: KeyCode) -> Result<()> {
-        let Mode::ProjectEdit(_, text) = &mut self.mode else {
-            return Ok(());
-        };
         match key {
             KeyCode::Esc => self.mode = Mode::Browse,
-            KeyCode::Backspace => {
-                text.pop();
-            }
-            KeyCode::Char(character) => text.push(character),
             KeyCode::Enter => self.save_project_edit()?,
             _ => {}
         }
@@ -1334,3 +1364,11 @@ impl App {
 #[cfg(test)]
 #[path = "tests/app.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/reset_history.rs"]
+mod reset_history_tests;
+
+#[cfg(test)]
+#[path = "tests/editor.rs"]
+mod editor_tests;

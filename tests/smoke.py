@@ -24,7 +24,10 @@ with tempfile.TemporaryDirectory() as data:
         with sqlite3.connect(dbpath) as db:
             return db.execute("SELECT description FROM tasks ORDER BY id").fetchall()
 
+    captured = []
+
     def launch():
+        captured.clear()
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
         before = termios.tcgetattr(slave)
@@ -40,6 +43,7 @@ with tempfile.TemporaryDirectory() as data:
         out = b""
         while select.select([master], [], [], 0.1)[0]:
             out += os.read(master, 65536)
+        captured.append(out)
         return b" ".join(re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b" ", out).split())
 
     def send(keys):
@@ -49,6 +53,9 @@ with tempfile.TemporaryDirectory() as data:
     def finish(expected):
         assert proc.wait(timeout=3) == expected
         assert termios.tcgetattr(slave) == before, "terminal attributes not restored"
+        output = b"".join(captured)
+        assert b"\x1b[2 q" in output, "steady native block cursor was not requested"
+        assert b"\x1b[0 q" in output, "terminal default cursor style was not restored"
         os.close(master)
         os.close(slave)
 
@@ -68,12 +75,23 @@ with tempfile.TemporaryDirectory() as data:
         assert proc.poll() is None, "help should not execute browsing shortcuts"
         send(b"\x1b")
         assert rows() == []
+        assert b"\x1b[?25l" in b"".join(captured), "browsing must hide the native cursor"
         assert b"Title cannot be empty" in send(b"a\r")
+        assert b"\x1b[?25h" in captured[-1], "editing must show the native cursor"
         send(b"first\r")
         assert rows() == [("first", 0)]
+        send(b"\t ")
+        assert rows() == [("first", 1)], "Tab must focus the right task list"
+        send(b"\x1b[Z ")
+        assert rows() == [("first", 1)], "Shift+Tab must return to the sidebar"
+        send(b"\x1b[Z ")
+        assert rows() == [("first", 0)], "Shift+Tab must also focus the right panel"
+        send(b"\t")
         send(b"aabandoned\x1b")
         assert len(rows()) == 1
-        send(b"\rr!\tdescription first\rsecond line\x13")
+        # Replace characters in-place in Title and the preceding Description line.
+        send(b"\re!\x1b[H\x1b[C\x1b[3~i\tdescription first\rsecond line"
+             b"\x1b[H\x1b[A\x1b[C\x1b[3~e\x13")
         assert rows() == [("first!", 0)]
         assert descriptions() == [("description first\nsecond line",)]
         send(b" ")
@@ -101,7 +119,7 @@ with tempfile.TemporaryDirectory() as data:
         send(b"\x0bpending\r")
         assert b"Task:" in send(b"\x0bpalette task")
         send(b"\r")
-        send(b"\x0breword\r!\r")
+        send(b"\x0bedit\r!\r")
         assert rows() == [("palette task!", 0)]
         send(b"\x0breopen\r")
         assert rows() == [("palette task!", 1)]
@@ -125,7 +143,7 @@ with tempfile.TemporaryDirectory() as data:
         send(b"d\r")
         assert rows() == []
         send(b"1apreserved\r")
-        send(b"\rr\tbackup description\x13")
+        send(b"\re\tbackup description\x13")
         assert descriptions() == [("backup description",)]
         assert b"No todo commits" in send(b"3")
         assert b"Commit message cannot be empty" in send(b"c\r")
@@ -207,7 +225,7 @@ with tempfile.TemporaryDirectory() as data:
         send(b"0\r")
         send(b"\r!")
         send(b"\x1b")
-        assert rows() == [("parent", 0)], "Enter in details must open a cancellable reword popup"
+        assert rows() == [("parent", 0)], "Enter in details must open a cancellable edit popup"
         send(b"achild\r")
         send(b"\x1b[C\ragrandchild\r")
         assert rows() == [("parent", 0), ("child", 0), ("grandchild", 0)]
@@ -226,18 +244,18 @@ with tempfile.TemporaryDirectory() as data:
             send(b"\x1b")
         send(b" ")
         assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
-        send(b"r!")
+        send(b"e!")
         send(b"\x1b")
         assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
-        send(b"r\tparent details\x13")
+        send(b"e\tparent details\x13")
         assert descriptions()[0] == ("parent details",)
         assert b"Delete task AND its subtasks?" in send(b"\r\x1b[C\rd")
         send(b"ynq")
         assert len(rows()) == 3
         send(b"\x1b")
-        send(b"r!")
+        send(b"e!")
         send(b"\x1b")
-        assert rows()[1] == ("child", 1), "Esc must cancel subtask rewording"
+        assert rows()[1] == ("child", 1), "Esc must cancel subtask editing"
         send(b"\x1b")
         send(b"cnested snapshot\r")
         deadline = time.monotonic() + 5
@@ -281,7 +299,7 @@ with tempfile.TemporaryDirectory() as data:
         assert rows() == [("natural", 0)]
         with sqlite3.connect(dbpath) as db:
             assert db.execute("SELECT due_date FROM tasks").fetchone()[0] == "2026-10-12"
-        send(b"r\tfinish 29-02-2028\x13")
+        send(b"e\tfinish 29-02-2028\x13")
         assert descriptions() == [("finish",)]
         with sqlite3.connect(dbpath) as db:
             assert db.execute("SELECT due_date FROM tasks").fetchone()[0] == "2028-02-29", "description phrases must replace an existing deadline"

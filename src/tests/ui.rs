@@ -170,7 +170,7 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
     assert!(text.contains("Due: 2000-01-01"));
     assert!(text.contains("Subtasks"));
     assert!(text.contains("[ ] child"));
-    assert!(!text.contains("Reword task: Title"));
+    assert!(!text.contains("Edit task: Title"));
     assert_eq!(
         cells.iter().filter(|cell| cell.symbol() == "┌").count(),
         0,
@@ -262,7 +262,7 @@ fn due_date_field_has_its_own_focus_cursor_and_validation_row() -> Result<()> {
     terminal.draw(|frame| draw(frame, &app))?;
     let cells = &terminal.backend().buffer().content;
     let text: String = cells.iter().map(|cell| cell.symbol()).collect();
-    assert!(text.contains("2026-02-30▏"));
+    assert!(text.contains("2026-02-30"));
     assert!(text.contains("YYYY-MM-DD; blank clears"));
     assert!(text.contains(&app.message));
     assert_eq!(
@@ -270,7 +270,8 @@ fn due_date_field_has_its_own_focus_cursor_and_validation_row() -> Result<()> {
             .iter()
             .filter(|cell| cell.symbol().contains('▏'))
             .count(),
-        1
+        0,
+        "native cursor must not insert a glyph"
     );
     let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
     assert_eq!(corners.len(), 3);
@@ -382,7 +383,7 @@ fn creation_and_reword_popups_have_only_three_fields_and_one_cursor() -> Result<
             let cells = &terminal.backend().buffer().content;
             let text: String = cells.iter().map(|cell| cell.symbol()).collect();
             assert!(text.contains(if id.is_some() {
-                "Reword task: Title"
+                "Edit task: Title"
             } else {
                 "Add task: Title"
             }));
@@ -395,7 +396,8 @@ fn creation_and_reword_popups_have_only_three_fields_and_one_cursor() -> Result<
                     .iter()
                     .filter(|cell| cell.symbol().contains('▏'))
                     .count(),
-                1
+                0,
+                "native cursor must not insert a glyph"
             );
             let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
             assert_eq!(corners.len(), 3);
@@ -540,9 +542,10 @@ fn task_editor_shows_only_the_focused_fields_footer_and_cursor() -> Result<()> {
                 .iter()
                 .filter(|cell| cell.symbol().contains('▏'))
                 .count(),
-            1
+            0,
+            "native cursor must not insert a glyph"
         );
-        assert!(text.contains(if focused { "LAST▏" } else { "task▏" }));
+        assert!(text.contains(if focused { "LAST" } else { "task" }));
         let corners: Vec<_> = cells.iter().filter(|cell| cell.symbol() == "┌").collect();
         assert_eq!(corners.len(), 3);
         assert_eq!(corners[2].fg, Color::DarkGray);
@@ -604,8 +607,8 @@ fn input_dialogs_use_relative_width_and_scroll_long_titles() -> Result<()> {
                 );
                 let text: String = cells.iter().map(|cell| cell.symbol()).collect();
                 assert!(
-                    text.contains("end▏"),
-                    "input tail/cursor must remain visible"
+                    text.contains("end"),
+                    "input tail must remain visible beside the native cursor"
                 );
                 let bottom = bottom_left / width as usize;
                 let footer: String = cells[bottom * width as usize..(bottom + 1) * width as usize]

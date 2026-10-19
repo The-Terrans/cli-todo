@@ -39,6 +39,7 @@ pub enum Action {
     Move,
     ShowFilter(usize),
     OpenTask(i64),
+    ResetHistory,
     Quit,
 }
 
@@ -65,6 +66,7 @@ pub struct AutoDate {
 
 #[derive(Clone, Default)]
 pub struct TaskDraft {
+    pub cursors: Box<[crate::editor::TextCursor; 3]>,
     pub title: String,
     pub description: String,
     pub due_date: String,
@@ -92,6 +94,9 @@ pub enum Mode {
     Nuke {
         tasks: usize,
         projects: usize,
+        commits: usize,
+    },
+    ResetHistory {
         commits: usize,
     },
     Palette {
@@ -169,6 +174,7 @@ pub struct App {
     pub(crate) task_path: Vec<i64>,
     pub(crate) new_task_parent: Option<i64>,
     pub(crate) viewport: Rect,
+    pub(crate) input_cursor: crate::editor::TextCursor,
     pub navigation_focused: bool,
     pub selected_filter: usize,
     pub mode: Mode,

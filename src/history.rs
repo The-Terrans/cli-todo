@@ -168,6 +168,18 @@ impl History {
         Ok(())
     }
 
+    pub fn reset(&self) -> Result<()> {
+        if self.directory.try_exists()? {
+            fs::remove_dir_all(&self.directory).map_err(|error| {
+                format!(
+                    "History cleanup failed: {error}. Some files may remain at {}",
+                    self.directory.display()
+                )
+            })?;
+        }
+        Ok(())
+    }
+
     pub fn remote(&self) -> Result<String> {
         if !self.directory.join(".git").exists() {
             return Ok(String::new());

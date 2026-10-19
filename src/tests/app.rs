@@ -49,22 +49,26 @@ fn task_views_drill_down_add_children_edit_and_complete_without_popups() -> Resu
     assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Details);
     app.handle_key(KeyCode::Down)?;
     assert!(app.task_view.as_ref().unwrap().scroll > 0);
-    for (key, expected) in [
-        (KeyCode::Tab, TaskPane::Subtasks),
-        (KeyCode::BackTab, TaskPane::Details),
-    ] {
+    for key in [KeyCode::Tab, KeyCode::BackTab] {
+        let scroll = app.task_view.as_ref().unwrap().scroll;
         app.handle_key(key)?;
-        assert_eq!(app.task_view.as_ref().unwrap().focus, expected);
+        assert!(app.navigation_focused);
+        app.handle_key(key)?;
+        assert!(!app.navigation_focused);
+        let view = app.task_view.as_ref().unwrap();
+        assert_eq!(view.focus, TaskPane::Details);
+        assert_eq!(view.scroll, scroll);
+        assert_eq!(view.task.title, "parent");
         assert!(matches!(app.mode, Mode::Browse));
     }
     app.handle_key(KeyCode::Right)?;
     assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Subtasks);
-    for (key, expected) in [
-        (KeyCode::Tab, TaskPane::Details),
-        (KeyCode::BackTab, TaskPane::Subtasks),
-    ] {
+    for key in [KeyCode::Tab, KeyCode::BackTab] {
         app.handle_key(key)?;
-        assert_eq!(app.task_view.as_ref().unwrap().focus, expected);
+        assert!(app.navigation_focused);
+        app.handle_key(key)?;
+        assert!(!app.navigation_focused);
+        assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Subtasks);
         assert!(matches!(app.mode, Mode::Browse));
     }
     app.handle_key(KeyCode::Left)?;
@@ -114,12 +118,9 @@ fn task_views_drill_down_add_children_edit_and_complete_without_popups() -> Resu
     app.handle_key(KeyCode::Esc)?;
     assert_eq!(app.new_task_parent, None);
     assert_eq!(app.task_view.as_ref().unwrap().children.len(), 2);
-    app.handle_key(KeyCode::Char('e'))?;
-    assert!(
-        matches!(app.mode, Mode::Browse),
-        "e no longer rewords tasks"
-    );
     app.handle_key(KeyCode::Char('r'))?;
+    assert!(matches!(app.mode, Mode::Browse), "r no longer edits tasks");
+    app.handle_key(KeyCode::Char('e'))?;
     assert!(matches!(app.mode, Mode::Edit(Some(id), _) if id == parent));
     app.handle_key(KeyCode::Char('!'))?;
     app.handle_key(KeyCode::Enter)?;
@@ -179,7 +180,7 @@ fn date_phrases_override_due_dates_and_are_removed_on_create_reword_and_subtasks
         today.checked_add_days(chrono::Days::new(7))
     );
     app.handle_key(KeyCode::Char('0'))?;
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     if let Mode::Edit(_, draft) = &mut app.mode {
         draft.description = "finish 12 oct 2026".into();
         App::update_auto_date(draft);
@@ -342,7 +343,7 @@ fn next_month_and_day_first_dates_fill_live_from_title_and_description() -> Resu
     app.handle_key(KeyCode::Enter)?;
     assert_eq!(app.tasks[0].title, "work");
     app.handle_key(KeyCode::Char('0'))?;
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     app.handle_key(KeyCode::Tab)?;
     for c in "finish 12-12-2000".chars() {
         app.handle_key(KeyCode::Char(c))?;
@@ -365,7 +366,7 @@ fn task_popups_cycle_only_title_description_and_due_date() -> Result<()> {
             app.handle_key(KeyCode::Char('t'))?;
             app.handle_key(KeyCode::Enter)?;
             app.handle_key(KeyCode::Char('0'))?;
-            app.handle_key(KeyCode::Char('r'))?;
+            app.handle_key(KeyCode::Char('e'))?;
         }
         for field in [TaskField::Description, TaskField::DueDate, TaskField::Title] {
             app.handle_key(KeyCode::Tab)?;
@@ -521,13 +522,13 @@ fn due_dates_validate_preserve_drafts_and_can_be_cleared() -> Result<()> {
     app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
     assert_eq!(app.tasks[0].due_date, parse_due_date("2028-02-29")?);
     app.handle_key(KeyCode::Char('0'))?;
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Backspace)?;
     app.handle_key(KeyCode::Esc)?;
     assert_eq!(app.tasks[0].due_date, parse_due_date("2028-02-29")?);
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Tab)?;
     for _ in 0..10 {
@@ -562,7 +563,7 @@ fn nested_tasks_are_created_reworded_and_deleted_from_the_right_panel() -> Resul
     app.handle_key(KeyCode::Char('q'))?;
     app.handle_key(KeyCode::Esc)?;
     assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     app.handle_key(KeyCode::Char('!'))?;
     app.handle_key(KeyCode::Esc)?;
     assert_eq!(app.task_view.as_ref().unwrap().task.title, "child");
@@ -599,7 +600,7 @@ fn palette_opens_subtasks_for_rewording_and_nesting_is_bounded() -> Result<()> {
     app.handle_key(KeyCode::Enter)?;
     assert!(matches!(app.mode, Mode::Browse));
     assert_eq!(app.task_view.as_ref().unwrap().task.title, "child");
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     assert!(
         matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "child" && draft.depth == 1)
     );
@@ -1044,7 +1045,7 @@ fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
     assert!(matches!(app.mode, Mode::Browse));
     assert_eq!(app.tasks[0].description, "界\nc");
     app.handle_key(KeyCode::Enter)?;
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     assert!(
         matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "t" && draft.description == "界\nc" && draft.focus == TaskField::Title)
     );
@@ -1052,7 +1053,7 @@ fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
     app.handle_key(KeyCode::Char('!'))?;
     app.handle_key(KeyCode::Esc)?;
     assert_eq!(app.tasks[0].description, "界\nc");
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Char('!'))?;
     app.handle_key(KeyCode::Tab)?;
@@ -1243,20 +1244,49 @@ fn projects_create_move_search_rename_and_confirm_deletion() -> Result<()> {
 }
 
 #[test]
-fn enter_and_escape_switch_panels_while_tab_does_nothing() -> Result<()> {
+fn tab_switches_panels_in_every_section_including_empty_lists() -> Result<()> {
     let mut app = app()?;
-    for key in [KeyCode::Esc, KeyCode::Tab, KeyCode::BackTab] {
-        app.handle_key(key)?;
+    for section in ['1', '2', '3'] {
+        app.handle_key(KeyCode::Char(section))?;
+        let context = (
+            app.projects_focused,
+            app.commits_focused,
+            app.current_project,
+        );
+        app.selected_task = 2;
+        app.selected_commit = 3;
+        app.detail_scroll = 4;
+        for key in [KeyCode::Tab, KeyCode::BackTab] {
+            app.handle_key_event(KeyEvent::new(
+                key,
+                if key == KeyCode::BackTab {
+                    KeyModifiers::SHIFT
+                } else {
+                    KeyModifiers::NONE
+                },
+            ))?;
+            assert!(!app.navigation_focused);
+            app.handle_key(key)?;
+            assert!(app.navigation_focused);
+            assert_eq!(
+                (
+                    app.projects_focused,
+                    app.commits_focused,
+                    app.current_project
+                ),
+                context
+            );
+            assert_eq!(
+                (app.selected_task, app.selected_commit, app.detail_scroll),
+                (2, 3, 4)
+            );
+        }
+        app.handle_key(KeyCode::Enter)?;
+        // Projects cannot be entered without a selected project; preserve that behavior.
+        assert_eq!(app.navigation_focused, section == '2');
+        app.handle_key(KeyCode::Esc)?;
         assert!(app.navigation_focused);
     }
-    app.handle_key(KeyCode::Enter)?;
-    assert!(!app.navigation_focused);
-    for key in [KeyCode::Tab, KeyCode::BackTab] {
-        app.handle_key(key)?;
-        assert!(!app.navigation_focused);
-    }
-    app.handle_key(KeyCode::Esc)?;
-    assert!(app.navigation_focused);
     Ok(())
 }
 
@@ -1295,7 +1325,7 @@ fn palette_finds_tasks_outside_current_filter() -> Result<()> {
     assert_eq!(app.selected_filter, 0);
     assert_eq!(app.tasks[app.selected_task].id, id);
     assert!(!app.navigation_focused);
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     assert!(matches!(app.mode, Mode::Edit(Some(task_id), _) if task_id == id));
     Ok(())
 }
@@ -1338,6 +1368,7 @@ fn palette_handles_no_matches_and_requires_enter_to_quit() -> Result<()> {
             Action::ShowFilter(0),
             Action::ShowFilter(1),
             Action::ShowFilter(2),
+            Action::ResetHistory,
             Action::Quit
         ]
     );
@@ -1363,7 +1394,7 @@ fn palette_reuses_task_actions_and_delete_confirmation() -> Result<()> {
     app.handle_key(KeyCode::Enter)?;
     assert_eq!(app.tasks[0].title, "x");
     assert!(app.navigation_focused);
-    search_actions(&mut app, "reword")?;
+    search_actions(&mut app, "edit")?;
     app.handle_key(KeyCode::Enter)?;
     app.handle_key(KeyCode::Char('!'))?;
     app.handle_key(KeyCode::Enter)?;
@@ -1432,7 +1463,7 @@ fn editing_validates_titles_and_keeps_shortcuts_as_text() -> Result<()> {
     app.handle_key(KeyCode::Enter)?;
     app.handle_key(KeyCode::Enter)?;
     assert!(matches!(app.mode, Mode::Browse));
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     app.handle_key(KeyCode::Char('!'))?;
     app.handle_key(KeyCode::Enter)?;
     assert_eq!(app.tasks[0].title, "q!");
@@ -1450,7 +1481,7 @@ fn escape_discards_new_and_edited_titles() -> Result<()> {
     app.handle_key(KeyCode::Esc)?;
     assert_eq!(app.tasks.len(), 1);
     app.handle_key(KeyCode::Enter)?;
-    app.handle_key(KeyCode::Char('r'))?;
+    app.handle_key(KeyCode::Char('e'))?;
     app.handle_key(KeyCode::Backspace)?;
     app.handle_key(KeyCode::Esc)?;
     assert!(matches!(app.mode, Mode::Browse));
@@ -1551,7 +1582,7 @@ fn deletion_requires_confirmation() -> Result<()> {
     for key in [
         KeyCode::Down,
         KeyCode::Enter,
-        KeyCode::Char('r'),
+        KeyCode::Char('e'),
         KeyCode::Char('d'),
         KeyCode::Char(' '),
     ] {
