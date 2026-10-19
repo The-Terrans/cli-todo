@@ -348,6 +348,7 @@ impl App {
             Mode::Edit(..) => self.handle_edit_key(key)?,
             Mode::Delete(id) => self.handle_delete_key(key, id)?,
             Mode::Nuke { .. } => self.handle_nuke_key(key)?,
+            Mode::ResetHistory { .. } => self.handle_reset_history_key(key),
             Mode::Palette { .. } => return self.handle_palette_key(key),
             Mode::ProjectEdit(..) => self.handle_project_edit_key(key)?,
             Mode::ProjectDelete(id) => self.handle_project_delete_key(key, id)?,
@@ -440,6 +441,42 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    fn begin_reset_history(&mut self) {
+        if self.sync_receiver.is_some() {
+            self.message = "Wait for sync to finish before resetting todo history".into();
+            return;
+        }
+        self.mode = Mode::ResetHistory {
+            commits: self.commits.len(),
+        };
+    }
+
+    fn handle_reset_history_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Enter => {
+                if self.sync_receiver.is_some() {
+                    self.message = "Wait for sync to finish before resetting todo history".into();
+                    return;
+                }
+                let result = self.history.as_ref().map_or(Ok(()), History::reset);
+                self.reload_commits();
+                self.load_remote();
+                self.update_commit_status();
+                match result {
+                    Ok(()) => {
+                        self.mode = Mode::Browse;
+                        self.message = "Local history and remote settings deleted. Todos kept. No backup created.".into();
+                    }
+                    Err(error) => {
+                        self.message = format!("Could not reset todo history: {error}");
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn focus_inbox(&mut self) -> Result<()> {
@@ -916,6 +953,7 @@ impl App {
                 self.open_task(id, false)?;
                 self.navigation_focused = false;
             }
+            Action::ResetHistory => self.begin_reset_history(),
             Action::Quit => return Ok(true),
         }
         Ok(false)
@@ -946,7 +984,11 @@ impl App {
             .iter()
             .copied()
             .filter(|(label, action)| {
-                (has_task || matches!(action, Action::Add | Action::ShowFilter(_) | Action::Quit))
+                (has_task
+                    || matches!(
+                        action,
+                        Action::Add | Action::ShowFilter(_) | Action::ResetHistory | Action::Quit
+                    ))
                     && label.to_lowercase().contains(&query)
             })
             .collect()
@@ -1335,3 +1377,7 @@ impl App {
 #[cfg(test)]
 #[path = "tests/app.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/reset_history.rs"]
+mod reset_history_tests;

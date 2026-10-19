@@ -201,6 +201,15 @@ Each checkpoint uses SQLite `VACUUM INTO` to make a consistent snapshot while th
 
 Up/Down selects a commit and immediately previews its Git details on the right: hash, author, timestamps, message, and binary file statistics. Enter or **0** focuses the details; Up/Down scrolls, Esc returns to Commits. History remains available across app restarts. There is no JSON conversion, readable task diff, automatic commit, or arbitrary historical restore action. Snapshots contain your private todo data; review before sharing the history repository.
 
+## Reset todo history without deleting todos
+
+1. Press **Ctrl+K**, search **Reset todo history**, and press **Enter**.
+2. Review the warning. **Enter** permanently deletes local checkpoints and disconnects the old remote; **Esc** cancels. No new backup is created.
+3. Press **3 → r** to connect an empty private repository.
+4. Press **c** to create a fresh first checkpoint, then **p** in Commits to push it.
+
+All todos, subtasks, descriptions, due dates, completion states, and projects are preserved. Existing backups and the old remote repository are untouched. Reset leaves zero local checkpoints and is blocked during sync. Do not use **Shift+D** for this—it deletes todos too. Close other app instances before resetting history.
+
 ## Remote backup and sync
 
 Create an empty **private** GitHub repository, then press **3 → r**, enter its SSH or HTTPS URL, and press Enter. **r** also changes origin; erase the URL and save to remove it. Removing origin does not delete local checkpoints. The configured URL appears in the right preview. The remote input uses the compact layout: 3 rows (4 with an error), 70% width with a 60-column minimum, and Enter/Esc in the bottom-right border. Long URLs scroll horizontally; the title reminds you that blank input removes origin.
@@ -216,7 +225,7 @@ Sync runs in the background; progress and errors appear in the footer. You can n
 
 Press **Ctrl+K**, type a task title or action name, use **Up/Down** to choose, and press **Enter**. **Esc** or **Ctrl+K** closes it. Search uses case-insensitive substring matching across all tasks, including tasks outside the current status filter. Results are labeled Action or Task. Selecting a task opens its project or Inbox with the All filter and focuses that task; use the usual shortcuts to edit, complete, or delete it.
 
-Actions: add, edit selected task, complete/reopen selected task, delete selected task, move selected task, show All/Pending/Completed, and quit. Task actions work from either panel and are hidden when no task is selected. Delete still asks for confirmation. Ctrl+K does not interrupt editing or deletion confirmation. Typing `q` in the palette searches for Quit; Enter is required to execute it.
+Actions: add, edit selected task, complete/reopen selected task, delete selected task, move selected task, show All/Pending/Completed, reset todo history, and quit. Task actions work from either panel and are hidden when no task is selected. Delete still asks for confirmation. Ctrl+K does not interrupt editing or deletion confirmation. Typing `q` in the palette searches for Quit; Enter is required to execute it.
 
 ## Storage
 

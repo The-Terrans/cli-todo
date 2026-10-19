@@ -453,6 +453,7 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
         }
         Mode::NoChanges => return draw_no_changes_dialog(frame),
         Mode::Nuke { .. } => return draw_nuke_dialog(frame, app),
+        Mode::ResetHistory { .. } => return draw_reset_history_dialog(frame, app),
         Mode::ProjectDelete(_) => (
             " Delete project AND its tasks? ",
             "All tasks in this project will be permanently deleted.\nEnter: confirm · Esc: cancel"
@@ -867,6 +868,42 @@ fn draw_nuke_dialog(frame: &mut Frame, app: &App) {
                         .fg(Color::LightYellow)
                         .bg(Color::Reset)
                         .remove_modifier(Modifier::BOLD),
+                )
+                .alignment(Alignment::Right),
+            ),
+        ),
+        area,
+    );
+}
+
+fn draw_reset_history_dialog(frame: &mut Frame, app: &App) {
+    let Mode::ResetHistory { commits } = app.mode else {
+        return;
+    };
+    let mut lines = vec![
+        Line::styled(
+            format!("Permanently delete {commits} local commits + remote settings?"),
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::raw("All todos, subtasks, projects and existing backups are kept."),
+        Line::raw("Remote repository is untouched. No new backup is created."),
+    ];
+    if !app.message.is_empty() {
+        lines.push(Line::styled(
+            app.message.lines().next().unwrap_or(""),
+            Style::default().fg(Color::LightRed),
+        ));
+    }
+    let area = dialog_area(frame.area(), lines.len() as u16 + 2);
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            panel(" Reset todo history ", true).title_bottom(
+                Line::styled(
+                    "──Enter: confirm ── Esc: cancel ──",
+                    Style::default().fg(Color::LightYellow).bg(Color::Reset),
                 )
                 .alignment(Alignment::Right),
             ),

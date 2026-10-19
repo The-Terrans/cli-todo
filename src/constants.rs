@@ -37,6 +37,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  r             Set/change/remove origin",
     "  p             Push committed snapshots",
     "  Shift+P       Safely pull and apply the latest snapshot",
+    "  Ctrl+K        Search Reset todo history (keeps todos; no backup)",
     "",
     "TEXT ENTRY, SEARCH AND MOVE",
     "  Typing        Append text/search, including ? and shortcut letters",
@@ -74,7 +75,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Tab/Shift+Tab Cycles panel focus in browsing; popup fields in editor",
 ];
 
-pub(crate) const ACTIONS: [(&str, Action); 9] = [
+pub(crate) const ACTIONS: [(&str, Action); 10] = [
     ("Add task", Action::Add),
     ("Reword selected task", Action::Edit),
     ("Complete / reopen selected task", Action::ToggleCompletion),
@@ -83,5 +84,6 @@ pub(crate) const ACTIONS: [(&str, Action); 9] = [
     ("Show all tasks", Action::ShowFilter(0)),
     ("Show pending tasks", Action::ShowFilter(1)),
     ("Show completed tasks", Action::ShowFilter(2)),
+    ("Reset todo history", Action::ResetHistory),
     ("Quit", Action::Quit),
 ];

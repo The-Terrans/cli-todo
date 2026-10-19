@@ -1371,6 +1371,7 @@ fn palette_handles_no_matches_and_requires_enter_to_quit() -> Result<()> {
             Action::ShowFilter(0),
             Action::ShowFilter(1),
             Action::ShowFilter(2),
+            Action::ResetHistory,
             Action::Quit
         ]
     );

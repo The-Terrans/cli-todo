@@ -39,6 +39,7 @@ pub enum Action {
     Move,
     ShowFilter(usize),
     OpenTask(i64),
+    ResetHistory,
     Quit,
 }
 
@@ -92,6 +93,9 @@ pub enum Mode {
     Nuke {
         tasks: usize,
         projects: usize,
+        commits: usize,
+    },
+    ResetHistory {
         commits: usize,
     },
     Palette {
