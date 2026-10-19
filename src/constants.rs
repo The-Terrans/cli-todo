@@ -24,7 +24,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "",
     "TASKS AND PROJECTS",
     "  a             Add task; add child when a task is open",
-    "  r             Reword task: Title / Description / Due date",
+    "  e             Edit task: Title / Description / Due date",
     "  e             Rename project in Projects",
     "  x             Toggle opened/selected task completed/pending",
     "  PageUp/Down   Scroll opened task details (Home/End jump)",
@@ -63,7 +63,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Left / Right  Cycle task details / subtask list",
     "  Up / Down     Scroll details or select a focused child",
     "  Enter         Open selected child when Subtasks is focused",
-    "  Enter / r     Reword when Details is focused; r works in either pane",
+    "  Enter / e     Edit when Details is focused; e works in either pane",
     "  x             Toggle opened task; completing cascades",
     "  d             Delete opened task and descendants with confirmation",
     "  Save / Esc    Save/cancel the current popup; return to task details",
@@ -82,7 +82,7 @@ pub const KEYBINDINGS: &[&str] = &[
 
 pub(crate) const ACTIONS: [(&str, Action); 10] = [
     ("Add task", Action::Add),
-    ("Reword selected task", Action::Edit),
+    ("Edit selected task", Action::Edit),
     ("Complete / reopen selected task", Action::ToggleCompletion),
     ("Delete selected task", Action::Delete),
     ("Move selected task", Action::Move),

@@ -526,9 +526,9 @@ fn draw_task_editor(
         .remove_modifier(Modifier::BOLD);
     let mut title = panel(
         match (editing, subtask) {
-            (true, true) => " Reword subtask: Title ",
+            (true, true) => " Edit subtask: Title ",
             (false, true) => " Add subtask: Title ",
-            (true, false) => " Reword task: Title ",
+            (true, false) => " Edit task: Title ",
             (false, false) => " Add task: Title ",
         },
         title_focused,

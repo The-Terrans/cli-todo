@@ -280,7 +280,7 @@ impl App {
                 db::toggle_task(&self.db, id)?;
                 self.refresh_tasks()?;
             }
-            KeyCode::Enter | KeyCode::Char('r') => {
+            KeyCode::Enter | KeyCode::Char('e') => {
                 self.execute_action(Action::Edit)?;
             }
             KeyCode::Char('d') => {
@@ -852,7 +852,7 @@ impl App {
                 }
                 return Ok(());
             }
-            KeyCode::Char('r') => Action::Edit,
+            KeyCode::Char('e') => Action::Edit,
             KeyCode::Char('d') => Action::Delete,
             KeyCode::Char('m') => Action::Move,
             KeyCode::Char(' ') => Action::ToggleCompletion,

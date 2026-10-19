@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix="cli-todo external ") as directory:
     with Harness(root / "round trip") as app:
         app.send(b"\x07")  # Inactive while browsing.
         assert not app.recoveries()
-        app.send(b"aold\r\rr")
+        app.send(b"aold\r\re")
         assert app.tasks() == [("old", "", None)]
         output = app.send(b"\x07")
         assert b"FAKE_EDITOR_TERMINAL" in b"".join(app.captured)
@@ -122,7 +122,7 @@ with tempfile.TemporaryDirectory(prefix="cli-todo external ") as directory:
         assert not app.recoveries(), "successful imports must remove private temporary files"
         app.send(b"\x1b")
         assert app.tasks() == [("old", "", None)], "Esc must discard imported changes"
-        app.send(b"r\x07\r")
+        app.send(b"e\x07\r")
         expected = [("new tomorrow", "next week stays literal\n", "2028-02-29")]
         assert app.tasks() == expected, "explicit date must win without stripping imported phrases"
         assert not app.recoveries()
@@ -132,7 +132,7 @@ with tempfile.TemporaryDirectory(prefix="cli-todo external ") as directory:
         app.send(b"\x1b")
         app.send(b"0")
         assert (app.root / "receipts").read_text() == receipts
-        app.send(b"1\rr")
+        app.send(b"1\re")
         for mode in ["invalid", "nonzero"]:
             (app.root / "mode").write_text(mode)
             output = app.send(b"\x07")
@@ -140,7 +140,7 @@ with tempfile.TemporaryDirectory(prefix="cli-todo external ") as directory:
             assert app.tasks() == expected
             app.send(b"\r")  # Saving unchanged original draft cannot import failed edits.
             assert app.tasks() == expected
-            app.send(b"r")
+            app.send(b"e")
         recoveries = app.recoveries()
         assert len(recoveries) == 2
         assert {path.read_text() for path in recoveries} == {

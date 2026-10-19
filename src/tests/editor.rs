@@ -2,6 +2,65 @@ use super::*;
 use crate::editor::TextCursor;
 use std::path::Path;
 
+#[test]
+fn e_edits_tasks_and_subtasks_while_remote_r_and_project_e_stay_unchanged() -> Result<()> {
+    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    db::save_task_tree(
+        &app.db,
+        None,
+        &TaskDraft {
+            title: "parent".into(),
+            subtasks: vec![crate::types::SubtaskDraft {
+                id: None,
+                done: false,
+                draft: TaskDraft {
+                    title: "child".into(),
+                    ..TaskDraft::default()
+                },
+            }],
+            ..TaskDraft::default()
+        },
+        None,
+    )?;
+    app.refresh_tasks()?;
+    app.navigation_focused = false;
+    // Main list, parent Details, parent Subtasks, and child Details.
+    for step in 0..4 {
+        app.handle_key(KeyCode::Char('r'))?;
+        assert!(
+            matches!(app.mode, Mode::Browse),
+            "r must not remain an edit alias"
+        );
+        let title = if step == 3 { "child" } else { "parent" };
+        app.handle_key(KeyCode::Char('e'))?;
+        assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.title == title));
+        keys(&mut app, &[KeyCode::Char('e'), KeyCode::Char('r')])?;
+        assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.title == format!("{title}er")));
+        app.handle_key(KeyCode::Esc)?;
+        match step {
+            0 | 2 => {
+                app.handle_key(KeyCode::Enter)?;
+            }
+            1 => {
+                app.handle_key(KeyCode::Right)?;
+            }
+            _ => {}
+        }
+    }
+    app.handle_key(KeyCode::Char('3'))?;
+    app.handle_key(KeyCode::Char('e'))?;
+    assert!(matches!(app.mode, Mode::Browse));
+    app.handle_key(KeyCode::Char('r'))?;
+    assert!(matches!(app.mode, Mode::RemoteEdit(_)));
+    app.handle_key(KeyCode::Esc)?;
+    db::save_project(&app.db, None, "Work")?;
+    app.refresh_projects()?;
+    app.handle_key(KeyCode::Char('2'))?;
+    app.handle_key(KeyCode::Char('e'))?;
+    assert!(matches!(&app.mode, Mode::ProjectEdit(Some(_), name) if name == "Work"));
+    Ok(())
+}
+
 fn keys(app: &mut App, keys: &[KeyCode]) -> Result<()> {
     for key in keys {
         app.handle_key(*key)?;

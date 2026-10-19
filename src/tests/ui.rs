@@ -170,7 +170,7 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
     assert!(text.contains("Due: 2000-01-01"));
     assert!(text.contains("Subtasks"));
     assert!(text.contains("[ ] child"));
-    assert!(!text.contains("Reword task: Title"));
+    assert!(!text.contains("Edit task: Title"));
     assert_eq!(
         cells.iter().filter(|cell| cell.symbol() == "┌").count(),
         0,
@@ -383,7 +383,7 @@ fn creation_and_reword_popups_have_only_three_fields_and_one_cursor() -> Result<
             let cells = &terminal.backend().buffer().content;
             let text: String = cells.iter().map(|cell| cell.symbol()).collect();
             assert!(text.contains(if id.is_some() {
-                "Reword task: Title"
+                "Edit task: Title"
             } else {
                 "Add task: Title"
             }));
