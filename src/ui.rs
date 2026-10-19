@@ -505,18 +505,19 @@ fn draw_task_editor(
     let description_focused = draft.focus == TaskField::Description;
     let due_focused = draft.focus == TaskField::DueDate;
     let area = task_editor_area(frame.area());
+    let error_height = if message.is_empty() {
+        0
+    } else {
+        Paragraph::new(message)
+            .wrap(Wrap { trim: false })
+            .line_count(area.width.saturating_sub(2))
+            .max(1)
+            .min(area.height.saturating_sub(9).max(1) as usize) as u16
+    };
     let rows = Layout::vertical([
-        Constraint::Length(if message.is_empty() || due_focused {
-            3
-        } else {
-            4
-        }),
+        Constraint::Length(3 + if due_focused { 0 } else { error_height }),
         Constraint::Fill(1),
-        Constraint::Length(if !message.is_empty() && due_focused {
-            4
-        } else {
-            3
-        }),
+        Constraint::Length(3 + if due_focused { error_height } else { 0 }),
     ])
     .split(area);
     let hint = Style::default()
@@ -590,11 +591,12 @@ fn draw_task_editor(
     );
     if !message.is_empty() && !due_focused && title_inner.height > 1 {
         frame.render_widget(
-            Paragraph::new(message.lines().next().unwrap_or(""))
+            Paragraph::new(message)
+                .wrap(Wrap { trim: false })
                 .style(Style::default().fg(Color::LightRed)),
             Rect {
                 y: title_inner.y + 1,
-                height: 1,
+                height: title_inner.height.saturating_sub(1),
                 ..title_inner
             },
         );
@@ -671,10 +673,12 @@ fn draw_due_date(frame: &mut Frame, area: Rect, draft: &TaskDraft, message: &str
     }
     if !message.is_empty() && inner.height > 1 {
         frame.render_widget(
-            Paragraph::new(message).style(Style::default().fg(Color::LightRed)),
+            Paragraph::new(message)
+                .wrap(Wrap { trim: false })
+                .style(Style::default().fg(Color::LightRed)),
             Rect {
                 y: inner.y + 1,
-                height: 1,
+                height: inner.height.saturating_sub(1),
                 ..inner
             },
         );

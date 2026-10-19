@@ -117,6 +117,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Enter in text entry          | Save title; in task Description, insert newline           |
 | Tab / Shift+Tab in editor    | Cycle Title / Description / Due date                      |
 | Ctrl+S outside Title         | Save the current task editor                              |
+| Ctrl+G in task editor        | Edit the whole draft in an external editor                |
 | Left / Right in editors      | Move the cursor; typing inserts at its position           |
 | Up / Down in Description     | Move between explicit newline-separated lines             |
 | Home / End in editors        | Move to the beginning/end of the current line             |
@@ -148,6 +149,28 @@ In Description, **Enter** inserts a newline and **Ctrl+S** saves the entire task
 The task list shows the first nonblank description line beneath its title, indented in dim dark gray. An ellipsis indicates additional lines; press Enter for full details, or r to reword. Empty descriptions take no extra row. Terminal font size is fixed, so subdued styling provides the visual hierarchy.
 
 Existing tasks get empty descriptions automatically. Descriptions persist across restarts and are included in Git snapshots and safe Pull. Older snapshots without descriptions remain readable and are upgraded when applied.
+
+## External editor
+
+1. Set **VISUAL** or **EDITOR** to an installed editor, for example `export EDITOR=nvim` or `export VISUAL='code --wait'`. The first nonempty setting wins: VISUAL, then EDITOR. There is no fallback editor or automatic installation.
+2. Open a task creation/reword popup and press **Ctrl+G** from any field.
+3. Edit the private temporary file, preserving its two headers and blank separator:
+
+   ```text
+   Title: Buy groceries
+   Due date: YYYY-MM-DD
+
+   Milk
+   Bread
+   ```
+
+4. Save and exit the external editor. Changes return to the popup **without saving to the database**. Use the app's usual save controls, or Esc to discard.
+
+When no date is set, the template shows `Due date: YYYY-MM-DD`. Existing dates remain unchanged in the template. Leave the placeholder unchanged or clear it for no deadline; replace it with a valid date such as `2028-02-29` to set one. Title must be nonblank. The description is everything after the blank separator, including its whitespace and final newline. Imported date phrases stay literal: the Due date header is authoritative. Subtasks, completion, project, and parent relationships are not edited by this file.
+
+Editor settings accept quoted executable paths and arguments, but never run through a shell: variables, pipes, and command substitutions are not expanded. Choose an editor/option that waits until editing finishes; a GUI editor that exits immediately cannot return later changes.
+
+Ctrl+G works only inside task/subtask popups, not browsing, search, or project/commit/remote dialogs. The app temporarily releases the terminal and restores its UI and block cursor afterward. A missing editor setting leaves the draft untouched. A failed editor or invalid file also leaves the draft untouched and retains the temporary file; the error starts with its recovery path. Successful imports remove the temporary directory. Recovery files contain todo text—remove them manually when no longer needed. On Linux/macOS, temporary directories and files are created with owner-only permissions (700/600).
 
 ## Due dates
 
@@ -246,6 +269,7 @@ cargo test
 cargo clippy -- -D warnings
 cargo build
 python3 tests/smoke.py
+python3 tests/external_editor.py
 ```
 
 Unit tests verify Push/Pull against temporary local Git remotes, including dirty-data refusal, divergence, malformed snapshots, and rollback after an injected Git failure. These checks do not contact GitHub.
