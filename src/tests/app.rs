@@ -49,22 +49,26 @@ fn task_views_drill_down_add_children_edit_and_complete_without_popups() -> Resu
     assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Details);
     app.handle_key(KeyCode::Down)?;
     assert!(app.task_view.as_ref().unwrap().scroll > 0);
-    for (key, expected) in [
-        (KeyCode::Tab, TaskPane::Subtasks),
-        (KeyCode::BackTab, TaskPane::Details),
-    ] {
+    for key in [KeyCode::Tab, KeyCode::BackTab] {
+        let scroll = app.task_view.as_ref().unwrap().scroll;
         app.handle_key(key)?;
-        assert_eq!(app.task_view.as_ref().unwrap().focus, expected);
+        assert!(app.navigation_focused);
+        app.handle_key(key)?;
+        assert!(!app.navigation_focused);
+        let view = app.task_view.as_ref().unwrap();
+        assert_eq!(view.focus, TaskPane::Details);
+        assert_eq!(view.scroll, scroll);
+        assert_eq!(view.task.title, "parent");
         assert!(matches!(app.mode, Mode::Browse));
     }
     app.handle_key(KeyCode::Right)?;
     assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Subtasks);
-    for (key, expected) in [
-        (KeyCode::Tab, TaskPane::Details),
-        (KeyCode::BackTab, TaskPane::Subtasks),
-    ] {
+    for key in [KeyCode::Tab, KeyCode::BackTab] {
         app.handle_key(key)?;
-        assert_eq!(app.task_view.as_ref().unwrap().focus, expected);
+        assert!(app.navigation_focused);
+        app.handle_key(key)?;
+        assert!(!app.navigation_focused);
+        assert_eq!(app.task_view.as_ref().unwrap().focus, TaskPane::Subtasks);
         assert!(matches!(app.mode, Mode::Browse));
     }
     app.handle_key(KeyCode::Left)?;
@@ -1243,20 +1247,49 @@ fn projects_create_move_search_rename_and_confirm_deletion() -> Result<()> {
 }
 
 #[test]
-fn enter_and_escape_switch_panels_while_tab_does_nothing() -> Result<()> {
+fn tab_switches_panels_in_every_section_including_empty_lists() -> Result<()> {
     let mut app = app()?;
-    for key in [KeyCode::Esc, KeyCode::Tab, KeyCode::BackTab] {
-        app.handle_key(key)?;
+    for section in ['1', '2', '3'] {
+        app.handle_key(KeyCode::Char(section))?;
+        let context = (
+            app.projects_focused,
+            app.commits_focused,
+            app.current_project,
+        );
+        app.selected_task = 2;
+        app.selected_commit = 3;
+        app.detail_scroll = 4;
+        for key in [KeyCode::Tab, KeyCode::BackTab] {
+            app.handle_key_event(KeyEvent::new(
+                key,
+                if key == KeyCode::BackTab {
+                    KeyModifiers::SHIFT
+                } else {
+                    KeyModifiers::NONE
+                },
+            ))?;
+            assert!(!app.navigation_focused);
+            app.handle_key(key)?;
+            assert!(app.navigation_focused);
+            assert_eq!(
+                (
+                    app.projects_focused,
+                    app.commits_focused,
+                    app.current_project
+                ),
+                context
+            );
+            assert_eq!(
+                (app.selected_task, app.selected_commit, app.detail_scroll),
+                (2, 3, 4)
+            );
+        }
+        app.handle_key(KeyCode::Enter)?;
+        // Projects cannot be entered without a selected project; preserve that behavior.
+        assert_eq!(app.navigation_focused, section == '2');
+        app.handle_key(KeyCode::Esc)?;
         assert!(app.navigation_focused);
     }
-    app.handle_key(KeyCode::Enter)?;
-    assert!(!app.navigation_focused);
-    for key in [KeyCode::Tab, KeyCode::BackTab] {
-        app.handle_key(key)?;
-        assert!(!app.navigation_focused);
-    }
-    app.handle_key(KeyCode::Esc)?;
-    assert!(app.navigation_focused);
     Ok(())
 }
 

@@ -71,6 +71,13 @@ with tempfile.TemporaryDirectory() as data:
         assert b"Title cannot be empty" in send(b"a\r")
         send(b"first\r")
         assert rows() == [("first", 0)]
+        send(b"\t ")
+        assert rows() == [("first", 1)], "Tab must focus the right task list"
+        send(b"\x1b[Z ")
+        assert rows() == [("first", 1)], "Shift+Tab must return to the sidebar"
+        send(b"\x1b[Z ")
+        assert rows() == [("first", 0)], "Shift+Tab must also focus the right panel"
+        send(b"\t")
         send(b"aabandoned\x1b")
         assert len(rows()) == 1
         send(b"\rr!\tdescription first\rsecond line\x13")

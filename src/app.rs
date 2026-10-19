@@ -237,9 +237,7 @@ impl App {
         };
         let (maximum, page) = crate::ui::task_detail_scroll_bounds(view, self.viewport);
         match key {
-            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab
-                if !view.children.is_empty() =>
-            {
+            KeyCode::Left | KeyCode::Right if !view.children.is_empty() => {
                 view.focus = match view.focus {
                     TaskPane::Details => TaskPane::Subtasks,
                     TaskPane::Subtasks => TaskPane::Details,
@@ -370,6 +368,9 @@ impl App {
             KeyCode::Char('?') => self.mode = Mode::Help { scroll: 0 },
             KeyCode::Char('c') => self.begin_commit(),
             KeyCode::Char('D') => self.begin_nuke()?,
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.navigation_focused = !self.navigation_focused;
+            }
             KeyCode::Char('0') => self.navigation_focused = false,
             KeyCode::Char('1') => self.focus_inbox()?,
             KeyCode::Left | KeyCode::Right if self.navigation_focused => self.cycle_section(key)?,
