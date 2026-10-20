@@ -232,8 +232,10 @@ fn invalid_import_keeps_original_draft_and_recovery_file() -> Result<()> {
         assert!(app.message.contains(path.to_str().unwrap()));
         assert_eq!(fs::read(&path)?, bytes);
     }
-    let mut draft = TaskDraft::default();
-    draft.title = "multiline\ntitle".into();
+    let draft = TaskDraft {
+        title: "multiline\ntitle".into(),
+        ..TaskDraft::default()
+    };
     assert!(ExternalEdit::create(&draft, command(), &root.0).is_err());
     Ok(())
 }
