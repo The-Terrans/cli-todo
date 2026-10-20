@@ -12,6 +12,8 @@ import tempfile
 import termios
 import time
 
+from smoke_helpers import wait_for_output
+
 binary = Path(os.environ.get("CLI_TODO_BINARY", str(Path(__file__).resolve().parents[1] / "target/debug/cli-todo"))).resolve()
 with tempfile.TemporaryDirectory() as data:
     dbpath = Path(data) / "cli-todo/tasks.sqlite3"
@@ -50,6 +52,9 @@ with tempfile.TemporaryDirectory() as data:
         os.write(master, keys)
         return screen()
 
+    def ready():
+        return wait_for_output(screen, (b"Inbox", b"Tasks", b"?: keybindings"))
+
     def finish(expected):
         assert proc.wait(timeout=3) == expected
         assert termios.tcgetattr(slave) == before, "terminal attributes not restored"
@@ -61,11 +66,7 @@ with tempfile.TemporaryDirectory() as data:
 
     proc, master, slave, before = launch()
     try:
-        first = screen()
-        deadline = time.monotonic() + 5
-        while not all(text in first for text in [b"Inbox", b"Tasks", b"?: keybindings"]):
-            assert time.monotonic() < deadline, "initial frame did not render"
-            first += b" " + screen()
+        ready()
         assert b"Keybindings" in send(b"?")
         send(b"\x1b[F")
         send(b"\x1b[H")
@@ -107,7 +108,8 @@ with tempfile.TemporaryDirectory() as data:
         send(b"q")
         finish(0)
         proc, master, slave, before = launch()
-        assert b"first!" in screen()
+        first = ready()
+        wait_for_output(screen, b"first!", initial=first)
         assert descriptions() == [("description first\nsecond line",)]
         send(b"\rd\r")
         assert rows() == []
@@ -196,8 +198,8 @@ with tempfile.TemporaryDirectory() as data:
         send(b"q")
         finish(0)
         proc, master, slave, before = launch()
-        screen()
-        assert b"second checkpoint" in send(b"3")
+        ready()
+        wait_for_output(screen, b"second checkpoint", initial=send(b"3"))
         send(b"1\r ")
         send(b"2aClear me\r\raproject to clear\r")
         assert b"remote settings?" in send(b"D")
@@ -215,7 +217,7 @@ with tempfile.TemporaryDirectory() as data:
         send(b"q")
         finish(0)
         proc, master, slave, before = launch()
-        screen()
+        ready()
         assert rows() == []
         output = send(b"aparent\t\t2026-02-30\r")
         assert b"YYYY-MM-DD date" in output
@@ -273,7 +275,7 @@ with tempfile.TemporaryDirectory() as data:
         send(b"q")
         finish(0)
         proc, master, slave, before = launch()
-        screen()
+        ready()
         assert rows() == [("parent", 0), ("child", 1), ("grandchild", 1)]
         with sqlite3.connect(dbpath) as db:
             assert db.execute("SELECT due_date FROM tasks WHERE parent_id IS NULL").fetchone()[0] == "2000-01-01"
