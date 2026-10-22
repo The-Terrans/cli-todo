@@ -48,7 +48,7 @@ fn reset_history_preserves_all_todo_data_and_can_connect_a_fresh_repo() -> Resul
         },
         Some(project),
     )?;
-    let mut app = App::new(database)?;
+    let mut app = App::new_showing_all(database)?;
     let history = app.history.as_ref().unwrap().clone();
     let old_remote = root.join("old-remote.git");
     assert!(std::process::Command::new("git")
@@ -132,7 +132,7 @@ fn reset_history_preserves_all_todo_data_and_can_connect_a_fresh_repo() -> Resul
     assert_eq!(fs::read_to_string(&backup)?, "existing backup");
     assert_eq!(fs::read(old_remote.join("refs/heads/main"))?, old_head);
     drop(app);
-    let mut app = App::new(db::open(&path)?)?;
+    let mut app = App::new_showing_all(db::open(&path)?)?;
     assert!(app.commits.is_empty() && app.remote_url.is_empty());
     assert_eq!(db::list_tasks(&app.db, Filter::All)?, tasks);
     let fresh_remote = root.join("fresh-remote.git");
@@ -185,7 +185,7 @@ fn reset_history_blocks_sync_and_reports_cleanup_failure_without_touching_todos(
         .as_nanos();
     let root = std::env::temp_dir().join(format!("cli-todo-reset-error-{stamp}"));
     fs::create_dir_all(&root)?;
-    let mut app = App::new(db::open(&root.join("tasks.sqlite3"))?)?;
+    let mut app = App::new_showing_all(db::open(&root.join("tasks.sqlite3"))?)?;
     db::save_task(&app.db, None, "keep")?;
     let (_sender, receiver) = mpsc::channel();
     app.sync_receiver = Some(receiver);

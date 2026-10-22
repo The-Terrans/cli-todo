@@ -1,5 +1,5 @@
 use crate::{
-    constants::{ACTIONS, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH},
+    constants::{ACTIONS, ALL_FILTER, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH},
     dates::{date_phrases, parse_due_date, remove_date_phrase},
     db,
     types::{
@@ -48,6 +48,14 @@ impl App {
         app.reload_commits();
         app.load_remote();
         app.update_commit_status();
+        Ok(app)
+    }
+
+    /// Starts on the All filter, as before Today became the default.
+    #[cfg(test)]
+    pub(crate) fn new_showing_all(db: Connection) -> Result<Self> {
+        let mut app = Self::new(db)?;
+        app.select_filter(ALL_FILTER)?;
         Ok(app)
     }
 
@@ -846,7 +854,7 @@ impl App {
             .projects
             .get(self.selected_project)
             .map(|project| project.id);
-        self.select_filter(0)
+        self.select_filter(ALL_FILTER)
     }
 
     fn handle_navigation_key(&mut self, key: KeyCode) -> Result<()> {
@@ -984,7 +992,7 @@ impl App {
                         self.selected_project = index;
                     }
                 }
-                self.select_filter(0)?;
+                self.select_filter(ALL_FILTER)?;
                 if let Some(index) = self.tasks.iter().position(|task| task.id == id) {
                     self.selected_task = index;
                 }
@@ -1271,7 +1279,15 @@ impl App {
             return Err(error);
         }
         let added_child = self.new_task_parent.take().is_some();
+        let listed = self.tasks.len();
         self.refresh_tasks()?;
+        if id.is_none()
+            && !added_child
+            && FILTERS[self.selected_filter].1 == Filter::Today
+            && self.tasks.len() == listed
+        {
+            self.message = "Added to All — not due today".into();
+        }
         if added_child {
             if let Some(view) = &mut self.task_view {
                 view.selected_child = view.children.len().saturating_sub(1);
@@ -1321,7 +1337,7 @@ impl App {
             KeyCode::Enter => {
                 if let Some(project) = self.projects.get(self.selected_project) {
                     self.current_project = Some(project.id);
-                    self.select_filter(0)?;
+                    self.select_filter(ALL_FILTER)?;
                     self.navigation_focused = false;
                 }
             }

@@ -454,3 +454,39 @@ fn positions_migrate_in_creation_order_swap_and_append_new_tasks() -> Result<()>
     fs::remove_file(path)?;
     Ok(())
 }
+
+#[test]
+fn today_roots_include_overdue_and_parents_of_due_subtasks() -> Result<()> {
+    let today = parse_due_date("2026-10-22")?.unwrap();
+    let task = |id, parent_id, done, due: &str| -> Result<Task> {
+        Ok(Task {
+            id,
+            title: id.to_string(),
+            description: String::new(),
+            done,
+            project_id: None,
+            parent_id,
+            subtask_count: 0,
+            due_date: parse_due_date(due)?,
+        })
+    };
+    let tasks = [
+        task(1, None, false, "2026-10-22")?,
+        task(2, None, false, "2026-10-01")?,
+        task(3, None, false, "2026-10-23")?,
+        task(4, None, true, "2026-10-22")?,
+        task(5, None, false, "")?,
+        task(6, Some(5), false, "")?,
+        task(7, Some(6), false, "2026-10-20")?,
+        task(8, None, false, "")?,
+        task(9, Some(8), true, "2026-10-20")?,
+    ];
+    let mut roots: Vec<_> = roots_due_by(&tasks, today).into_iter().collect();
+    roots.sort();
+    assert_eq!(
+        roots,
+        [1, 2, 5],
+        "due today, overdue, and a nested due subtask's root"
+    );
+    Ok(())
+}

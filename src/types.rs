@@ -23,8 +23,9 @@ pub struct Project {
     pub name: String,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Filter {
+    Today,
     All,
     Pending,
     Completed,

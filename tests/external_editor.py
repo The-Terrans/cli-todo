@@ -71,6 +71,8 @@ class Harness:
         while not all(word in first for word in [b"Inbox", b"Tasks"]):
             assert time.monotonic() < deadline, "app did not start"
             first += self.screen()
+        # Leave the Today default for All: these scenarios use undated tasks.
+        self.send(b"\x1b[B")
         return self
 
     def __exit__(self, *_):
