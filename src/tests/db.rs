@@ -412,3 +412,31 @@ fn blank_titles_cannot_be_saved() -> Result<()> {
     assert_eq!(list_tasks(&db, Filter::All)?[0].title, "keep this");
     Ok(())
 }
+
+#[test]
+fn positions_migrate_in_creation_order_swap_and_append_new_tasks() -> Result<()> {
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let path = env::temp_dir().join(format!("cli-todo-position-{stamp}.sqlite3"));
+    let legacy = Connection::open(&path)?;
+    legacy.execute_batch("CREATE TABLE tasks(id INTEGER PRIMARY KEY,title TEXT NOT NULL,done INTEGER NOT NULL DEFAULT 0); INSERT INTO tasks(title) VALUES ('first'),('second');")?;
+    drop(legacy);
+    let titles = |db: &Connection| -> Result<Vec<String>> {
+        Ok(list_tasks(db, Filter::All)?
+            .into_iter()
+            .map(|task| task.title)
+            .collect())
+    };
+    let db = open(&path)?;
+    assert_eq!(titles(&db)?, ["first", "second"]);
+    swap_tasks(&db, 1, 2)?;
+    create_task(&db, "third", None)?;
+    assert_eq!(titles(&db)?, ["second", "first", "third"]);
+    drop(db);
+    let db = open(&path)?;
+    assert_eq!(titles(&db)?, ["second", "first", "third"]);
+    drop(db);
+    fs::remove_file(path)?;
+    Ok(())
+}

@@ -1592,3 +1592,69 @@ fn deletion_requires_confirmation() -> Result<()> {
     assert_eq!(app.selected_task, 0);
     Ok(())
 }
+
+#[test]
+fn alt_j_and_k_reorder_tasks_and_focused_subtasks() -> Result<()> {
+    let mut app = app()?;
+    let child = |title: &str| SubtaskDraft {
+        id: None,
+        done: false,
+        draft: TaskDraft {
+            title: title.into(),
+            ..TaskDraft::default()
+        },
+    };
+    db::save_task_tree(
+        &app.db,
+        None,
+        &TaskDraft {
+            title: "first".into(),
+            subtasks: vec![child("child a"), child("child b")],
+            ..TaskDraft::default()
+        },
+        None,
+    )?;
+    for title in ["second", "third"] {
+        db::save_task_details(&app.db, None, title, "", None)?;
+    }
+    app.refresh_tasks()?;
+    let alt = |app: &mut App, character| {
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(character), KeyModifiers::ALT))
+    };
+    let titles = |tasks: &[crate::types::Task]| -> Vec<String> {
+        tasks.iter().map(|task| task.title.clone()).collect()
+    };
+    alt(&mut app, 'j')?;
+    assert_eq!(titles(&app.tasks), ["first", "second", "third"]);
+    app.handle_key(KeyCode::Char('0'))?;
+    alt(&mut app, 'k')?;
+    assert_eq!(titles(&app.tasks), ["first", "second", "third"]);
+    alt(&mut app, 'j')?;
+    alt(&mut app, 'j')?;
+    assert_eq!(titles(&app.tasks), ["second", "third", "first"]);
+    assert_eq!(app.selected_task, 2);
+    alt(&mut app, 'j')?;
+    assert_eq!(app.selected_task, 2);
+    alt(&mut app, 'k')?;
+    assert_eq!(titles(&app.tasks), ["second", "first", "third"]);
+    assert_eq!(app.selected_task, 1);
+    assert!(app.uncommitted_changes);
+    app.handle_key(KeyCode::Enter)?;
+    alt(&mut app, 'j')?;
+    assert_eq!(titles(&app.tasks), ["second", "first", "third"]);
+    app.handle_key(KeyCode::Right)?;
+    alt(&mut app, 'j')?;
+    let view = app.task_view.as_ref().unwrap();
+    assert_eq!(titles(&view.children), ["child b", "child a"]);
+    assert_eq!(view.selected_child, 1);
+    let id = view.task.id;
+    assert_eq!(
+        db::task_draft(&app.db, id)?
+            .subtasks
+            .iter()
+            .map(|child| child.draft.title.as_str())
+            .collect::<Vec<_>>(),
+        ["child b", "child a"]
+    );
+    Ok(())
+}

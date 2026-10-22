@@ -109,6 +109,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | d                            | Request task/project deletion in its section              |
 | Shift+D while browsing       | Confirm deletion of tasks, projects, local history and remote settings |
 | m in Tasks                   | Move task to Inbox or a project; arrows and Enter choose  |
+| Alt+J / Alt+K in Tasks       | Move selected task or focused subtask down/up; order is saved |
 | c while browsing             | Commit a safe todo SQLite snapshot from any panel         |
 | r in Commits                 | Set/change origin URL; empty input removes it             |
 | p / P in Commits             | Push checkpoints / safely pull and apply a snapshot       |
