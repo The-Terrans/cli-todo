@@ -196,26 +196,30 @@ fn draw_commit_details(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn task_view_areas(area: Rect, children: bool) -> (Rect, Option<Rect>) {
+/// Details keeps room for its borders, heading, divider and one description row.
+fn task_view_areas(area: Rect, children: bool, heading_lines: u16) -> (Rect, Option<Rect>) {
     if !children {
         return (area, None);
     }
-    let height = (area.height / 3).max(6).min(area.height.saturating_sub(3));
+    let height = (area.height / 3)
+        .max(heading_lines + 4)
+        .min(area.height.saturating_sub(3));
     let rows = Layout::vertical([Constraint::Length(height), Constraint::Min(3)]).split(area);
     (rows[0], Some(rows[1]))
 }
 
-fn task_detail_sections(inner: Rect) -> (Rect, Rect, Rect) {
+fn task_detail_sections(inner: Rect, heading_lines: u16) -> (Rect, Rect, Rect) {
     let rows = Layout::vertical([
-        Constraint::Length(inner.height.min(2)),
-        Constraint::Length(u16::from(inner.height > 2)),
+        Constraint::Length(inner.height.min(heading_lines)),
+        Constraint::Length(u16::from(inner.height > heading_lines)),
         Constraint::Min(0),
     ])
     .split(inner);
     (rows[0], rows[1], rows[2])
 }
 
-fn task_heading_text(task: &Task) -> Text<'static> {
+fn task_heading_text(view: &TaskView) -> Text<'static> {
+    let task = &view.task;
     let mut lines = vec![task_title_line(
         &task.title,
         task.done,
@@ -226,6 +230,12 @@ fn task_heading_text(task: &Task) -> Text<'static> {
             .add_modifier(Modifier::BOLD),
         Local::now().date_naive(),
     )];
+    if let Some(parent) = &view.parent_title {
+        lines.push(Line::styled(
+            format!("Parent: {parent}"),
+            Style::default().fg(Color::Gray),
+        ));
+    }
     let overdue = task
         .due_date
         .is_some_and(|date| is_overdue(date, task.done, Local::now().date_naive()));
@@ -264,8 +274,9 @@ fn task_description_text(task: &Task) -> Text<'static> {
 pub fn task_detail_scroll_bounds(view: &TaskView, viewport: Rect) -> (u16, u16) {
     let body = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(viewport)[0];
     let area = Layout::horizontal([Constraint::Percentage(25), Constraint::Min(0)]).split(body)[1];
-    let (details, _) = task_view_areas(area, !view.children.is_empty());
-    let (_, _, description) = task_detail_sections(panel("", false).inner(details));
+    let heading_lines = task_heading_text(view).height() as u16;
+    let (details, _) = task_view_areas(area, !view.children.is_empty(), heading_lines);
+    let (_, _, description) = task_detail_sections(panel("", false).inner(details), heading_lines);
     if description.height == 0 {
         return (0, 1);
     }
@@ -282,12 +293,15 @@ pub fn task_detail_scroll_bounds(view: &TaskView, viewport: Rect) -> (u16, u16) 
 
 fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
     let focused = matches!(app.mode, Mode::Browse) && !app.navigation_focused;
-    let (details, children) = task_view_areas(area, !view.children.is_empty());
+    let heading_text = task_heading_text(view);
+    let heading_lines = heading_text.height() as u16;
+    let (details, children) = task_view_areas(area, !view.children.is_empty(), heading_lines);
     let details_focused = focused && view.focus == TaskPane::Details;
-    let block = panel("─[0]─Task details", details_focused).border_type(BorderType::Rounded);
-    let (heading, divider, description) = task_detail_sections(block.inner(details));
+    let title = project_title(app, "─[0]─Task details", view.task.project_id);
+    let block = panel(&title, details_focused).border_type(BorderType::Rounded);
+    let (heading, divider, description) = task_detail_sections(block.inner(details), heading_lines);
     frame.render_widget(block, details);
-    frame.render_widget(Paragraph::new(task_heading_text(&view.task)), heading);
+    frame.render_widget(Paragraph::new(heading_text), heading);
     frame.render_widget(
         Paragraph::new(format!(
             "─ Description {}",
@@ -377,13 +391,7 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
     });
     let mut state = ListState::default()
         .with_selected((active && !app.tasks.is_empty()).then_some(app.selected_task));
-    let title = match app
-        .current_project
-        .and_then(|id| app.projects.iter().find(|project| project.id == id))
-    {
-        Some(project) => format!("─[0]─Tasks: {}", project.name),
-        None => "─[0]─Tasks".into(),
-    };
+    let title = project_title(app, "─[0]─Tasks", app.current_project);
     frame.render_stateful_widget(
         List::new(items)
             .highlight_spacing(HighlightSpacing::Always)
@@ -400,6 +408,13 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
                 .style(Style::default().fg(Color::Reset)),
             area.inner(Margin::new(2, 1)),
         );
+    }
+}
+
+fn project_title(app: &App, label: &str, project: Option<i64>) -> String {
+    match project.and_then(|id| app.projects.iter().find(|project| project.id == id)) {
+        Some(project) => format!("{label}: {}", project.name),
+        None => label.into(),
     }
 }
 

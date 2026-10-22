@@ -146,6 +146,7 @@ pub enum TaskPane {
 pub struct TaskView {
     pub focus: TaskPane,
     pub task: Task,
+    pub parent_title: Option<String>,
     pub children: Vec<Task>,
     pub selected_child: usize,
     pub scroll: u16,
