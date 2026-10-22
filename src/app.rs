@@ -316,10 +316,47 @@ impl App {
             }
             return Ok(false);
         }
+        if modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Char('j' | 'k')) {
+            let changes = self.db.total_changes();
+            self.message.clear();
+            let result = self.reorder_selected(key.code == KeyCode::Char('j'));
+            if self.db.total_changes() != changes {
+                self.update_commit_status();
+            }
+            return result.map(|_| false);
+        }
         if !modifiers.is_empty() {
             return Ok(false);
         }
         self.handle_key(key.code)
+    }
+
+    /// Swaps the selected task or focused subtask with its visible neighbour.
+    fn reorder_selected(&mut self, down: bool) -> Result<()> {
+        if !matches!(self.mode, Mode::Browse) || self.navigation_focused || self.commits_focused {
+            return Ok(());
+        }
+        let (tasks, selected) = match &self.task_view {
+            Some(view) if view.focus == TaskPane::Subtasks => (&view.children, view.selected_child),
+            Some(_) => return Ok(()),
+            None => (&self.tasks, self.selected_task),
+        };
+        let Some(target) = (if down {
+            selected.checked_add(1)
+        } else {
+            selected.checked_sub(1)
+        }) else {
+            return Ok(());
+        };
+        let (Some(task), Some(neighbour)) = (tasks.get(selected), tasks.get(target)) else {
+            return Ok(());
+        };
+        db::swap_tasks(&self.db, task.id, neighbour.id)?;
+        match &mut self.task_view {
+            Some(view) => view.selected_child = target,
+            None => self.selected_task = target,
+        }
+        self.refresh_tasks()
     }
 
     fn handle_key(&mut self, key: KeyCode) -> Result<bool> {

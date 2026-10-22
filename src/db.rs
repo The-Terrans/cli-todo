@@ -35,6 +35,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     migrate_description(&db)?;
     migrate_subtasks(&db)?;
     migrate_due_dates(&db)?;
+    migrate_positions(&db)?;
     validate_hierarchy(&db)?;
     Ok(db)
 }
@@ -66,6 +67,35 @@ pub fn migrate_due_dates(db: &Connection) -> Result<()> {
     if !has_column(db, "due_date")? {
         db.execute_batch("ALTER TABLE tasks ADD COLUMN due_date TEXT;")?;
     }
+    Ok(())
+}
+
+pub fn migrate_positions(db: &Connection) -> Result<()> {
+    if !has_column(db, "position")? {
+        db.execute_batch("ALTER TABLE tasks ADD COLUMN position INTEGER;")?;
+    }
+    // Existing tasks keep their creation order.
+    db.execute_batch("UPDATE tasks SET position=id WHERE position IS NULL;")?;
+    Ok(())
+}
+
+pub fn swap_tasks(db: &Connection, first: i64, second: i64) -> Result<()> {
+    let transaction = db.unchecked_transaction()?;
+    let position = |id: i64| -> Result<i64> {
+        Ok(
+            transaction.query_row("SELECT position FROM tasks WHERE id=?1", [id], |row| {
+                row.get(0)
+            })?,
+        )
+    };
+    let (first_position, second_position) = (position(first)?, position(second)?);
+    for (id, position) in [(first, second_position), (second, first_position)] {
+        transaction.execute(
+            "UPDATE tasks SET position=?1 WHERE id=?2",
+            params![position, id],
+        )?;
+    }
+    transaction.commit()?;
     Ok(())
 }
 
@@ -281,7 +311,8 @@ pub fn save_task_details(
         )?;
     } else {
         db.execute(
-            "INSERT INTO tasks(title,description,project_id) VALUES (?1,?2,?3)",
+            "INSERT INTO tasks(title,description,project_id,position)
+             VALUES (?1,?2,?3,(SELECT COALESCE(MAX(position),0)+1 FROM tasks))",
             params![title, description, project],
         )?;
     }
@@ -309,7 +340,8 @@ pub fn create_task(db: &Connection, title: &str, project: Option<i64>) -> Result
         return Err("Title cannot be empty".into());
     }
     db.execute(
-        "INSERT INTO tasks(title,project_id) VALUES (?1,?2)",
+        "INSERT INTO tasks(title,project_id,position)
+         VALUES (?1,?2,(SELECT COALESCE(MAX(position),0)+1 FROM tasks))",
         params![title, project],
     )?;
     Ok(())
@@ -340,8 +372,13 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
     } else {
         "NULL"
     };
+    let position = if has_column(db, "position")? {
+        "position"
+    } else {
+        "id"
+    };
     let mut statement = db.prepare(&format!(
-        "SELECT id,title,done,project_id,{description},{parent},{subtask_count},{due_date} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY id"
+        "SELECT id,title,done,project_id,{description},{parent},{subtask_count},{due_date} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY {position},id"
     ))?;
     let rows = statement.query_map([done], |row| {
         let date: Option<String> = row.get(7)?;
