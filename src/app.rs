@@ -3,8 +3,8 @@ use crate::{
     dates::{date_phrases, parse_due_date, remove_date_phrase},
     db,
     types::{
-        Action, App, AutoDate, Filter, History, Mode, SyncResult, TaskDraft, TaskField, TaskPane,
-        TaskView,
+        Action, App, AutoDate, Filter, History, Mode, SyncResult, Task, TaskDraft, TaskField,
+        TaskPane, TaskView,
     },
     Result,
 };
@@ -142,6 +142,7 @@ impl App {
                         TaskPane::Details
                     },
                     task: task.clone(),
+                    parent_title: parent_title(&tasks, task),
                     children,
                     selected_child,
                     scroll: if id == old_id { scroll } else { 0 },
@@ -188,6 +189,7 @@ impl App {
             }
             self.task_path.reverse();
         }
+        let parent_title = parent_title(&tasks, &task);
         let children = tasks
             .into_iter()
             .filter(|child| child.parent_id == Some(id))
@@ -195,6 +197,7 @@ impl App {
         self.task_view = Some(TaskView {
             focus: TaskPane::Details,
             task,
+            parent_title,
             children,
             selected_child: 0,
             scroll: 0,
@@ -1396,6 +1399,14 @@ impl App {
         }
         Ok(())
     }
+}
+
+fn parent_title(tasks: &[Task], task: &Task) -> Option<String> {
+    let parent = task.parent_id?;
+    tasks
+        .iter()
+        .find(|candidate| candidate.id == parent)
+        .map(|parent| parent.title.clone())
 }
 
 #[cfg(test)]

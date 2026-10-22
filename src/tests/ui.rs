@@ -63,12 +63,14 @@ fn live_date_keywords_are_highlighted_and_escape_removes_the_highlight() -> Resu
 }
 
 #[test]
-fn task_details_use_one_third_with_a_six_row_minimum_and_fit_small_terminals() {
-    for height in 0..=90 {
+fn task_details_use_one_third_with_a_heading_based_minimum_and_fit_small_terminals() {
+    for (height, heading_lines) in (0..=90).flat_map(|height| [(height, 2), (height, 3)]) {
         let area = Rect::new(2, 3, 80, height);
-        let (details, children) = task_view_areas(area, true);
+        let (details, children) = task_view_areas(area, true, heading_lines);
         let children = children.unwrap();
-        let expected = (height / 3).max(6).min(height.saturating_sub(3));
+        let expected = (height / 3)
+            .max(heading_lines + 4)
+            .min(height.saturating_sub(3));
         assert_eq!(details.height, expected);
         assert_eq!(children.height, height - expected);
         assert_eq!(details.x, area.x);
@@ -76,15 +78,15 @@ fn task_details_use_one_third_with_a_six_row_minimum_and_fit_small_terminals() {
         assert_eq!(details.width, area.width);
         assert_eq!(children.y, details.bottom());
         assert_eq!(children.bottom(), area.bottom());
-        assert_eq!(task_view_areas(area, false), (area, None));
+        assert_eq!(task_view_areas(area, false, heading_lines), (area, None));
         let inner = panel("", false).inner(details);
-        let (heading, divider, description) = task_detail_sections(inner);
-        assert_eq!(heading.height, inner.height.min(2));
-        assert_eq!(divider.height, u16::from(inner.height > 2));
+        let (heading, divider, description) = task_detail_sections(inner, heading_lines);
+        assert_eq!(heading.height, inner.height.min(heading_lines));
+        assert_eq!(divider.height, u16::from(inner.height > heading_lines));
         assert_eq!(divider.y, heading.bottom());
         assert_eq!(description.y, divider.bottom());
         assert_eq!(description.bottom(), inner.bottom());
-        if details.height >= 6 {
+        if details.height >= heading_lines + 4 {
             assert!(description.height >= 1);
         }
     }
@@ -879,5 +881,59 @@ fn only_focused_section_has_a_highlight() -> Result<()> {
         }
         assert_eq!(buffer[(28, 1)].symbol(), "[", "Tasks indent changed");
     }
+    Ok(())
+}
+
+#[test]
+fn task_details_show_project_header_and_subtask_parent() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    db::save_project(&db, None, "Work")?;
+    let project = db.last_insert_rowid();
+    db::save_task_tree(
+        &db,
+        None,
+        &TaskDraft {
+            title: "parent task".into(),
+            subtasks: vec![crate::types::SubtaskDraft {
+                id: None,
+                done: false,
+                draft: TaskDraft {
+                    title: "child task".into(),
+                    ..TaskDraft::default()
+                },
+            }],
+            ..TaskDraft::default()
+        },
+        Some(project),
+    )?;
+    let mut app = App::new(db)?;
+    let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+    let mut screen = |app: &App| -> Result<String> {
+        terminal.draw(|frame| draw(frame, app))?;
+        Ok(terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect())
+    };
+    for key in [KeyCode::Char('2'), KeyCode::Enter, KeyCode::Enter] {
+        app.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE))?;
+    }
+    let text = screen(&app)?;
+    assert!(text.contains("Task details: Work"));
+    assert!(
+        !text.contains("Parent:"),
+        "top-level tasks have no parent line"
+    );
+    for key in [KeyCode::Right, KeyCode::Enter] {
+        app.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE))?;
+    }
+    let text = screen(&app)?;
+    assert!(text.contains("Task details: Work"));
+    assert!(text.contains("[ ] child task"));
+    assert!(text.contains("Parent: parent task"));
+    assert!(text.contains("Due: none"));
     Ok(())
 }
