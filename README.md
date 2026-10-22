@@ -108,7 +108,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | x                            | Toggle opened/selected task between completed and pending |
 | d                            | Request task/project deletion in its section              |
 | Shift+D while browsing       | Confirm deletion of tasks, projects, local history and remote settings |
-| m in Tasks                   | Move task to Inbox or a project; arrows and Enter choose  |
+| m in Tasks                   | Move task to a project or No project; arrows and Enter choose |
 | Alt+J / Alt+K in Tasks       | Move selected task or focused subtask down/up; order is saved |
 | c while browsing             | Commit a safe todo SQLite snapshot from any panel         |
 | r in Commits                 | Set/change origin URL; empty input removes it             |
@@ -129,7 +129,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 
 All deletion confirmations use only **Enter** to confirm and **Esc** to cancel; y/n and q do nothing in these dialogs.
 
-Navigation offers All, Pending, and Completed filters. Arrows apply the filter immediately; Enter focuses its tasks. Input dialogs support Left/Right, Home/End, insertion, Backspace, and Delete. Search retains its existing append/backspace input and arrow selection. Project input dialogs use 3 rows and 70% of the terminal width (minimum 60 columns, reduced to fit smaller terminals), with Enter/Esc in the bottom border; errors add one row. Long title input scrolls horizontally to keep the cursor visible. Long titles remain stored but may be clipped in the task list. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
+Navigation offers All, Pending, and Completed filters. Inbox lists tasks from every project plus tasks with no project, in your manual order; project tasks show a `[Project]` tag. Arrows apply the filter immediately; Enter focuses its tasks. Input dialogs support Left/Right, Home/End, insertion, Backspace, and Delete. Search retains its existing append/backspace input and arrow selection. Project input dialogs use 3 rows and 70% of the terminal width (minimum 60 columns, reduced to fit smaller terminals), with Enter/Esc in the bottom border; errors add one row. Long title input scrolls horizontally to keep the cursor visible. Long titles remain stored but may be clipped in the task list. Use a terminal at least 80 columns wide for readable help; the help panel scrolls to fit short terminals.
 
 ## Opened tasks
 
@@ -206,9 +206,9 @@ Only top-level tasks appear in Inbox/project lists; manage children in the right
 
 The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to create a project. Use arrows to select a project: its tasks preview immediately on the right. **Enter** focuses those tasks. The focused panel has a bold bright-yellow border and a black-on-yellow title, even when its list is empty. Only its row cursor is highlighted; inactive panels have dark-gray borders and no highlighted cursor. **e** renames it. Names must be nonblank and unique.
 
-New tasks belong to the open project; press **1** to return to Inbox for unassigned tasks. In Tasks, press **m** (or search Move via Ctrl+K) to move a task between Inbox and projects. **Esc** returns through any opened task ancestry to the main list, then to its navigation section. Tab/Shift+Tab switches left/right panel focus throughout browsing, including main lists, opened tasks, and Commits. Switching back resumes the same position unless sidebar navigation changes the displayed content. Inside task popups, Tab/Shift+Tab still cycles editor fields.
+New tasks belong to the open project; tasks added from Inbox have no project. In Tasks, press **m** (or search Move via Ctrl+K) to move a task to a project or to **No project**. Alt+J/Alt+K in Inbox reorders the shared list; a project's own order changes only if the active filter hides its tasks between the swapped pair. **Esc** returns through any opened task ancestry to the main list, then to its navigation section. Tab/Shift+Tab switches left/right panel focus throughout browsing, including main lists, opened tasks, and Commits. Switching back resumes the same position unless sidebar navigation changes the displayed content. Inside task popups, Tab/Shift+Tab still cycles editor fields.
 
-**Deleting a project permanently deletes all its tasks**, after explicit confirmation. Esc cancels. Existing databases migrate automatically, preserving old tasks in Inbox.
+**Deleting a project permanently deletes all its tasks**, after explicit confirmation. Esc cancels. Existing databases migrate automatically, preserving old tasks with no project.
 
 ## Nuke todo data
 

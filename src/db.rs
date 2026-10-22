@@ -431,10 +431,13 @@ fn set_task_done(db: &Connection, id: i64, done: bool) -> Result<()> {
     Ok(())
 }
 
+/// Lists top-level tasks in `project`, or all top-level tasks (any project or none) when `None`.
 pub fn list_tasks_in(db: &Connection, filter: Filter, project: Option<i64>) -> Result<Vec<Task>> {
     Ok(list_tasks(db, filter)?
         .into_iter()
-        .filter(|task| task.parent_id.is_none() && task.project_id == project)
+        .filter(|task| {
+            task.parent_id.is_none() && project.is_none_or(|id| task.project_id == Some(id))
+        })
         .collect())
 }
 

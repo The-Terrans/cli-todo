@@ -937,3 +937,74 @@ fn task_details_show_project_header_and_subtask_parent() -> Result<()> {
     assert!(text.contains("Due: none"));
     Ok(())
 }
+
+#[test]
+fn inbox_lists_every_project_with_tags_and_filters() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    db::save_project(&db, None, "Work")?;
+    let work = db.last_insert_rowid();
+    db::save_task_details(&db, None, "write report", "", Some(work))?;
+    let report = db.last_insert_rowid();
+    db::save_task_details(&db, None, "buy milk", "", None)?;
+    db::save_task_details(&db, None, "done at work", "", Some(work))?;
+    db::toggle_task(&db, db.last_insert_rowid())?;
+    let mut app = App::new(db)?;
+    let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+    let mut screen = |app: &App| -> Result<String> {
+        terminal.draw(|frame| draw(frame, app))?;
+        Ok(terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect())
+    };
+    let press = |app: &mut App, key| app.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE));
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    assert_eq!(titles(&app), ["write report", "buy milk", "done at work"]);
+    let text = screen(&app)?;
+    assert!(text.contains("[ ] write report [Work]"));
+    assert!(
+        text.contains("[ ] buy milk "),
+        "unassigned tasks have no tag"
+    );
+    press(&mut app, KeyCode::Down)?;
+    assert_eq!(titles(&app), ["write report", "buy milk"]);
+    press(&mut app, KeyCode::Down)?;
+    assert_eq!(titles(&app), ["done at work"]);
+    press(&mut app, KeyCode::Char('2'))?;
+    assert!(
+        !screen(&app)?.contains("[Work]"),
+        "project lists omit the tag"
+    );
+    press(&mut app, KeyCode::Char('1'))?;
+    assert_eq!(app.selected_filter, 0);
+    for key in [KeyCode::Enter, KeyCode::Enter, KeyCode::Char('x')] {
+        press(&mut app, key)?;
+    }
+    let view = app
+        .task_view
+        .as_ref()
+        .expect("project task stays open in Inbox");
+    assert_eq!(view.task.id, report);
+    assert!(view.task.done);
+    assert!(screen(&app)?.contains("Task details: Work"));
+    press(&mut app, KeyCode::Char('m'))?;
+    assert!(screen(&app)?.contains("No project"));
+    press(&mut app, KeyCode::Esc)?;
+    press(&mut app, KeyCode::Esc)?;
+    press(&mut app, KeyCode::Char('a'))?;
+    for character in "new inbox task".chars() {
+        press(&mut app, KeyCode::Char(character))?;
+    }
+    press(&mut app, KeyCode::Enter)?;
+    let added = app
+        .tasks
+        .iter()
+        .find(|task| task.title == "new inbox task")
+        .unwrap();
+    assert_eq!(added.project_id, None);
+    Ok(())
+}

@@ -121,10 +121,12 @@ impl App {
         );
         let tasks = db::list_tasks(&self.db, Filter::All)?;
         loop {
-            if let Some(task) = tasks
-                .iter()
-                .find(|task| task.id == id && task.project_id == self.current_project)
-            {
+            if let Some(task) = tasks.iter().find(|task| {
+                task.id == id
+                    && self
+                        .current_project
+                        .is_none_or(|project| task.project_id == Some(project))
+            }) {
                 let children: Vec<_> = tasks
                     .iter()
                     .filter(|child| child.parent_id == Some(id))

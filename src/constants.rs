@@ -30,7 +30,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  PageUp/Down   Scroll opened task details (Home/End jump)",
     "  Space         Complete/reopen task (Tasks only)",
     "  d             Delete task/project with confirmation",
-    "  m             Move task to Inbox/project (Tasks only)",
+    "  m             Move task to a project or No project",
     "  Alt+J / Alt+K Move selected task down/up in the list",
     "  Shift+D       Nuke all data, local commits and remote settings",
     "",

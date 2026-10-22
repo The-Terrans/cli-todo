@@ -160,8 +160,16 @@ fn nested_subtasks_persist_move_and_delete_as_a_tree() -> Result<()> {
         .all(|task| task.project_id == Some(project)));
     move_task(&db, tasks[1].id, None)?;
     validate_hierarchy(&db)?;
-    assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 1);
-    assert_eq!(list_tasks_in(&db, Filter::All, None)?[0].parent_id, None);
+    let top_level = list_tasks_in(&db, Filter::All, None)?;
+    assert_eq!(top_level.len(), 2);
+    assert!(top_level.iter().all(|task| task.parent_id.is_none()));
+    assert_eq!(
+        top_level
+            .iter()
+            .filter(|task| task.project_id.is_none())
+            .count(),
+        1
+    );
     delete_project(&db, project)?;
     assert_eq!(list_tasks(&db, Filter::All)?.len(), 2);
     delete_task(&db, tasks[1].id)?;
@@ -336,10 +344,16 @@ fn projects_scope_move_and_cascade_tasks() -> Result<()> {
     save_task(&db, None, "Project task")?;
     let task = db.last_insert_rowid();
     move_task(&db, task, Some(project))?;
-    assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 1);
+    assert_eq!(
+        list_tasks_in(&db, Filter::All, None)?.len(),
+        2,
+        "Inbox lists every project"
+    );
+    assert_eq!(list_tasks_in(&db, Filter::All, Some(project))?.len(), 1);
     assert_eq!(list_tasks_in(&db, Filter::All, Some(project))?[0].id, task);
     move_task(&db, task, None)?;
     assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 2);
+    assert!(list_tasks_in(&db, Filter::All, Some(project))?.is_empty());
     move_task(&db, task, Some(project))?;
     save_project(&db, Some(project), "Renamed")?;
     assert_eq!(list_projects(&db)?[0].name, "Renamed");

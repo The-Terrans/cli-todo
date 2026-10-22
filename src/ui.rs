@@ -361,14 +361,34 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(Color::Reset)
         };
-        let mut lines = vec![task_title_line(
+        let mut title = task_title_line(
             &task.title,
             task.done,
             task.subtask_count,
             task.due_date,
             title_style,
             today,
-        )];
+        );
+        // Inbox mixes every project, so label each task with its own.
+        if let Some(project) = task
+            .project_id
+            .filter(|_| app.current_project.is_none())
+            .and_then(|id| app.projects.iter().find(|project| project.id == id))
+        {
+            let color = if index == app.selected_task && active {
+                Color::DarkGray
+            } else {
+                Color::Gray
+            };
+            title.spans.insert(
+                1,
+                Span::styled(
+                    format!(" [{}]", project.name),
+                    Style::default().fg(color).remove_modifier(Modifier::BOLD),
+                ),
+            );
+        }
+        let mut lines = vec![title];
         let mut description = task
             .description
             .lines()
@@ -937,8 +957,8 @@ fn draw_move_dialog(frame: &mut Frame, app: &App) {
     let inner = block.inner(area);
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
-    let destinations =
-        std::iter::once("Inbox").chain(app.projects.iter().map(|project| project.name.as_str()));
+    let destinations = std::iter::once("No project")
+        .chain(app.projects.iter().map(|project| project.name.as_str()));
     let mut state = ListState::default().with_selected(Some(*selected));
     frame.render_stateful_widget(
         List::new(destinations)
