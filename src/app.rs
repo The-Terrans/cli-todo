@@ -40,6 +40,7 @@ impl App {
             input_cursor: crate::editor::TextCursor::default(),
             navigation_focused: true,
             selected_filter: 0,
+            inbox_state: None,
             mode: Mode::Browse,
             message: String::new(),
             db,
@@ -486,6 +487,7 @@ impl App {
                 self.palette_tasks.clear();
                 self.selected_project = 0;
                 self.selected_filter = 0;
+                self.inbox_state = None;
                 self.mode = Mode::Browse;
                 self.focus_inbox()?;
                 self.selected_commit = 0;
@@ -543,10 +545,22 @@ impl App {
         self.projects_focused = false;
         self.commits_focused = false;
         self.current_project = None;
+        if let Some((filter, task)) = self.inbox_state.take() {
+            self.selected_filter = filter;
+            self.selected_task = task;
+        }
         self.refresh_tasks()
     }
 
+    /// Saves Inbox's filter and row before a project list replaces it.
+    fn leave_inbox(&mut self) {
+        if self.inbox_state.is_none() {
+            self.inbox_state = Some((self.selected_filter, self.selected_task));
+        }
+    }
+
     fn focus_projects(&mut self) -> Result<()> {
+        self.leave_inbox();
         self.navigation_focused = true;
         self.projects_focused = true;
         self.commits_focused = false;
@@ -981,13 +995,23 @@ impl App {
             }
             Action::OpenTask(id) => {
                 self.commits_focused = false;
-                if let Some(task) = self.palette_tasks.iter().find(|task| task.id == id) {
-                    self.current_project = task.project_id;
-                    self.projects_focused = task.project_id.is_some();
+                if let Some(project) = self
+                    .palette_tasks
+                    .iter()
+                    .find(|task| task.id == id)
+                    .map(|task| task.project_id)
+                {
+                    if project.is_some() {
+                        self.leave_inbox();
+                    } else {
+                        self.inbox_state = None;
+                    }
+                    self.current_project = project;
+                    self.projects_focused = project.is_some();
                     if let Some(index) = self
                         .projects
                         .iter()
-                        .position(|project| Some(project.id) == task.project_id)
+                        .position(|candidate| Some(candidate.id) == project)
                     {
                         self.selected_project = index;
                     }

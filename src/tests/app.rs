@@ -1719,3 +1719,48 @@ fn today_is_the_default_inbox_filter_and_projects_open_on_all() -> Result<()> {
     assert_eq!(app.palette_actions()[0].1, Action::ShowFilter(0));
     Ok(())
 }
+
+#[test]
+fn inbox_restores_its_filter_and_row_after_visiting_projects() -> Result<()> {
+    let mut app = app()?;
+    db::save_project(&app.db, None, "Work")?;
+    let work = app.db.last_insert_rowid();
+    for title in ["first", "second", "third"] {
+        db::save_task(&app.db, None, title)?;
+    }
+    db::create_task(&app.db, "project task", Some(work))?;
+    app.refresh_projects()?;
+    app.handle_key(KeyCode::Down)?;
+    assert_eq!(app.selected_filter, 2, "Pending");
+    app.handle_key(KeyCode::Enter)?;
+    app.handle_key(KeyCode::Down)?;
+    app.handle_key(KeyCode::Down)?;
+    let inbox = (app.selected_filter, app.selected_task);
+    assert_eq!(inbox, (2, 2));
+    app.handle_key(KeyCode::Char('2'))?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.selected_filter, ALL_FILTER);
+    assert_eq!(app.selected_task, 0);
+    app.handle_key(KeyCode::Char('3'))?;
+    app.handle_key(KeyCode::Char('2'))?;
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!((app.selected_filter, app.selected_task), inbox);
+    assert_eq!(app.current_project, None);
+    app.handle_key(KeyCode::Char('3'))?;
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!(
+        (app.selected_filter, app.selected_task),
+        inbox,
+        "Commits keeps Inbox state"
+    );
+    search_actions(&mut app, "project task")?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.current_project, Some(work));
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!(
+        (app.selected_filter, app.selected_task),
+        inbox,
+        "palette jumps keep Inbox state"
+    );
+    Ok(())
+}

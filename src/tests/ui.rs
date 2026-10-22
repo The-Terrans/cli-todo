@@ -980,6 +980,9 @@ fn inbox_lists_every_project_with_tags_and_filters() -> Result<()> {
         "project lists omit the tag"
     );
     press(&mut app, KeyCode::Char('1'))?;
+    assert_eq!(app.selected_filter, 3, "Inbox restores Completed");
+    press(&mut app, KeyCode::Up)?;
+    press(&mut app, KeyCode::Up)?;
     assert_eq!(app.selected_filter, crate::constants::ALL_FILTER);
     for key in [KeyCode::Enter, KeyCode::Enter, KeyCode::Char('x')] {
         press(&mut app, key)?;
