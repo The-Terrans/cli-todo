@@ -4,7 +4,7 @@ use std::path::Path;
 
 #[test]
 fn e_edits_tasks_and_subtasks_while_remote_r_and_project_e_stay_unchanged() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     db::save_task_tree(
         &app.db,
         None,
@@ -127,7 +127,7 @@ fn vertical_movement_uses_explicit_lines_and_preserves_preferred_display_column(
 
 #[test]
 fn task_editor_remembers_each_cursor_and_saves_in_place_changes() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     app.mode = Mode::Edit(
         None,
         TaskDraft {
@@ -183,7 +183,7 @@ fn task_editor_remembers_each_cursor_and_saves_in_place_changes() -> Result<()> 
 #[test]
 fn automatic_dates_follow_middle_edits_and_delete_dismisses_only_the_touched_phrase() -> Result<()>
 {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     app.handle_key(KeyCode::Char('a'))?;
     for character in "work tomorrow tail".chars() {
         app.handle_key(KeyCode::Char(character))?;
@@ -238,7 +238,7 @@ fn automatic_dates_follow_middle_edits_and_delete_dismisses_only_the_touched_phr
 
 #[test]
 fn compact_editors_share_cursor_keys_and_reset_cursor_on_open() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     for mode in [
         Mode::ProjectEdit(None, "abc".into()),
         Mode::CommitEdit("abc".into()),

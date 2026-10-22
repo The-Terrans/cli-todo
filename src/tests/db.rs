@@ -160,8 +160,16 @@ fn nested_subtasks_persist_move_and_delete_as_a_tree() -> Result<()> {
         .all(|task| task.project_id == Some(project)));
     move_task(&db, tasks[1].id, None)?;
     validate_hierarchy(&db)?;
-    assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 1);
-    assert_eq!(list_tasks_in(&db, Filter::All, None)?[0].parent_id, None);
+    let top_level = list_tasks_in(&db, Filter::All, None)?;
+    assert_eq!(top_level.len(), 2);
+    assert!(top_level.iter().all(|task| task.parent_id.is_none()));
+    assert_eq!(
+        top_level
+            .iter()
+            .filter(|task| task.project_id.is_none())
+            .count(),
+        1
+    );
     delete_project(&db, project)?;
     assert_eq!(list_tasks(&db, Filter::All)?.len(), 2);
     delete_task(&db, tasks[1].id)?;
@@ -336,10 +344,16 @@ fn projects_scope_move_and_cascade_tasks() -> Result<()> {
     save_task(&db, None, "Project task")?;
     let task = db.last_insert_rowid();
     move_task(&db, task, Some(project))?;
-    assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 1);
+    assert_eq!(
+        list_tasks_in(&db, Filter::All, None)?.len(),
+        2,
+        "Inbox lists every project"
+    );
+    assert_eq!(list_tasks_in(&db, Filter::All, Some(project))?.len(), 1);
     assert_eq!(list_tasks_in(&db, Filter::All, Some(project))?[0].id, task);
     move_task(&db, task, None)?;
     assert_eq!(list_tasks_in(&db, Filter::All, None)?.len(), 2);
+    assert!(list_tasks_in(&db, Filter::All, Some(project))?.is_empty());
     move_task(&db, task, Some(project))?;
     save_project(&db, Some(project), "Renamed")?;
     assert_eq!(list_projects(&db)?[0].name, "Renamed");
@@ -438,5 +452,41 @@ fn positions_migrate_in_creation_order_swap_and_append_new_tasks() -> Result<()>
     assert_eq!(titles(&db)?, ["second", "first", "third"]);
     drop(db);
     fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn today_roots_include_overdue_and_parents_of_due_subtasks() -> Result<()> {
+    let today = parse_due_date("2026-10-22")?.unwrap();
+    let task = |id, parent_id, done, due: &str| -> Result<Task> {
+        Ok(Task {
+            id,
+            title: id.to_string(),
+            description: String::new(),
+            done,
+            project_id: None,
+            parent_id,
+            subtask_count: 0,
+            due_date: parse_due_date(due)?,
+        })
+    };
+    let tasks = [
+        task(1, None, false, "2026-10-22")?,
+        task(2, None, false, "2026-10-01")?,
+        task(3, None, false, "2026-10-23")?,
+        task(4, None, true, "2026-10-22")?,
+        task(5, None, false, "")?,
+        task(6, Some(5), false, "")?,
+        task(7, Some(6), false, "2026-10-20")?,
+        task(8, None, false, "")?,
+        task(9, Some(8), true, "2026-10-20")?,
+    ];
+    let mut roots: Vec<_> = roots_due_by(&tasks, today).into_iter().collect();
+    roots.sort();
+    assert_eq!(
+        roots,
+        [1, 2, 5],
+        "due today, overdue, and a nested due subtask's root"
+    );
     Ok(())
 }

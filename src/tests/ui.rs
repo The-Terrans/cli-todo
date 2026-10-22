@@ -6,7 +6,7 @@ use std::path::Path;
 
 #[test]
 fn live_date_keywords_are_highlighted_and_escape_removes_the_highlight() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))?;
     for c in "chore today".chars() {
         app.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))?;
@@ -114,7 +114,7 @@ fn task_detail_heading_stays_visible_while_description_scrolls() -> Result<()> {
         },
         None,
     )?;
-    let mut app = App::new(db)?;
+    let mut app = App::new_showing_all(db)?;
     app.viewport.width = 100;
     app.resize(25);
     app.handle_key_event(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE))?;
@@ -160,7 +160,7 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
         },
         None,
     )?;
-    let mut app = App::new(db)?;
+    let mut app = App::new_showing_all(db)?;
     app.handle_key_event(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE))?;
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))?;
     let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
@@ -249,7 +249,7 @@ fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
 
 #[test]
 fn due_date_field_has_its_own_focus_cursor_and_validation_row() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     app.mode = Mode::Edit(
         None,
         TaskDraft {
@@ -325,7 +325,7 @@ fn titles_show_direct_subtask_counts_in_lists_and_opened_views() -> Result<()> {
         None,
     )?;
     db::save_task_details(&db, None, "solo", "", None)?;
-    let mut app = App::new(db)?;
+    let mut app = App::new_showing_all(db)?;
     assert_eq!(app.tasks[0].subtask_count, 2);
     assert_eq!(app.tasks[1].subtask_count, 0);
     let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
@@ -358,7 +358,7 @@ fn titles_show_direct_subtask_counts_in_lists_and_opened_views() -> Result<()> {
 
 #[test]
 fn creation_and_reword_popups_have_only_three_fields_and_one_cursor() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
     for id in [None, Some(1)] {
         for (index, focus) in [TaskField::Title, TaskField::Description, TaskField::DueDate]
@@ -424,7 +424,7 @@ fn task_descriptions_use_a_dim_preview_without_extra_empty_rows() -> Result<()> 
     db::save_task_details(&db, None, "with details", "first line\nsecond line", None)?;
     db::save_task_details(&db, None, "without details", "", None)?;
     db::save_task_details(&db, None, "blank details", " \n ", None)?;
-    let mut app = App::new(db)?;
+    let mut app = App::new_showing_all(db)?;
     let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
     for focused in [false, true] {
         if focused {
@@ -492,7 +492,7 @@ fn task_editor_height_scales_and_stays_centered_within_the_terminal() {
             assert!(dialog.height >= 15);
         }
     }
-    let mut app = App::new(db::open(Path::new(":memory:")).unwrap()).unwrap();
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:")).unwrap()).unwrap();
     app.mode = Mode::Edit(None, TaskDraft::default());
     for height in [20, 30, 50] {
         let mut terminal = Terminal::new(TestBackend::new(100, height)).unwrap();
@@ -512,7 +512,7 @@ fn task_editor_height_scales_and_stays_centered_within_the_terminal() {
 
 #[test]
 fn task_editor_shows_only_the_focused_fields_footer_and_cursor() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     app.mode = Mode::Edit(
         None,
         TaskDraft {
@@ -575,7 +575,7 @@ fn task_editor_shows_only_the_focused_fields_footer_and_cursor() -> Result<()> {
 fn input_dialogs_use_relative_width_and_scroll_long_titles() -> Result<()> {
     for width in [80, 160] {
         for kind in ["task", "project", "commit", "remote"] {
-            let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+            let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
             let input = format!("{}end", "界".repeat(80));
             app.mode = match kind {
                 "project" => Mode::ProjectEdit(None, input),
@@ -635,7 +635,7 @@ fn input_dialogs_use_relative_width_and_scroll_long_titles() -> Result<()> {
 
 #[test]
 fn no_changes_notification_is_a_popup_not_a_footer_message() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     app.mode = Mode::NoChanges;
     let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
     terminal.draw(|frame| draw(frame, &app))?;
@@ -668,7 +668,7 @@ fn no_changes_notification_is_a_popup_not_a_footer_message() -> Result<()> {
 
 #[test]
 fn footer_is_compact_and_help_is_readable_in_a_short_terminal() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
     for section in ['1', '2', '3', '0'] {
         app.handle_key_event(KeyEvent::new(KeyCode::Char(section), KeyModifiers::NONE))?;
@@ -727,7 +727,7 @@ fn nuke_warning_is_one_red_line_with_confirmation_in_bottom_border() -> Result<(
     let db = db::open(Path::new(":memory:"))?;
     db::save_task(&db, None, "task")?;
     db::save_project(&db, None, "Work")?;
-    let mut app = App::new(db)?;
+    let mut app = App::new_showing_all(db)?;
     app.handle_key_event(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT))?;
     for width in [80, 100] {
         let mut terminal = Terminal::new(TestBackend::new(width, 25))?;
@@ -798,7 +798,7 @@ fn nuke_warning_is_one_red_line_with_confirmation_in_bottom_border() -> Result<(
 fn section_title_separators_match_the_border_in_every_focus_state() -> Result<()> {
     let db = db::open(Path::new(":memory:"))?;
     db::save_project(&db, None, "Work─Home")?;
-    let mut app = App::new(db)?;
+    let mut app = App::new_showing_all(db)?;
     let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
     for key in ['1', '0', '2', '0', '3', '0'] {
         app.handle_key_event(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE))?;
@@ -829,7 +829,7 @@ fn section_title_separators_match_the_border_in_every_focus_state() -> Result<()
 
 #[test]
 fn empty_focused_panels_have_high_contrast_titles_and_borders() -> Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
     for (key, focused, inactive) in [
         ('2', (0, 8), (0, 0)),
@@ -857,7 +857,7 @@ fn only_focused_section_has_a_highlight() -> Result<()> {
     let project = db.last_insert_rowid();
     db::create_task(&db, "project task", Some(project))?;
     db::save_task(&db, None, "inbox task")?;
-    let mut app = App::new(db)?;
+    let mut app = App::new_showing_all(db)?;
     let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
     for key in ['1', '2', '0'] {
         app.handle_key_event(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE))?;
@@ -874,7 +874,7 @@ fn only_focused_section_has_a_highlight() -> Result<()> {
             .count();
         assert_eq!(highlighted_rows, 1, "section {key}");
         let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(3, 1)].symbol(), "A", "Inbox indent changed");
+        assert_eq!(buffer[(3, 1)].symbol(), "T", "Inbox indent changed");
         assert_eq!(buffer[(3, 9)].symbol(), "W", "Projects indent changed");
         for bottom in [7, 15, 23] {
             assert_eq!(buffer[(0, bottom)].symbol(), "╰", "Uneven section heights");
@@ -906,7 +906,7 @@ fn task_details_show_project_header_and_subtask_parent() -> Result<()> {
         },
         Some(project),
     )?;
-    let mut app = App::new(db)?;
+    let mut app = App::new_showing_all(db)?;
     let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
     let mut screen = |app: &App| -> Result<String> {
         terminal.draw(|frame| draw(frame, app))?;
@@ -935,5 +935,79 @@ fn task_details_show_project_header_and_subtask_parent() -> Result<()> {
     assert!(text.contains("[ ] child task"));
     assert!(text.contains("Parent: parent task"));
     assert!(text.contains("Due: none"));
+    Ok(())
+}
+
+#[test]
+fn inbox_lists_every_project_with_tags_and_filters() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    db::save_project(&db, None, "Work")?;
+    let work = db.last_insert_rowid();
+    db::save_task_details(&db, None, "write report", "", Some(work))?;
+    let report = db.last_insert_rowid();
+    db::save_task_details(&db, None, "buy milk", "", None)?;
+    db::save_task_details(&db, None, "done at work", "", Some(work))?;
+    db::toggle_task(&db, db.last_insert_rowid())?;
+    let mut app = App::new_showing_all(db)?;
+    let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+    let mut screen = |app: &App| -> Result<String> {
+        terminal.draw(|frame| draw(frame, app))?;
+        Ok(terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect())
+    };
+    let press = |app: &mut App, key| app.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE));
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    assert_eq!(titles(&app), ["write report", "buy milk", "done at work"]);
+    let text = screen(&app)?;
+    assert!(text.contains("[ ] write report [Work]"));
+    assert!(
+        text.contains("[ ] buy milk "),
+        "unassigned tasks have no tag"
+    );
+    press(&mut app, KeyCode::Down)?;
+    assert_eq!(titles(&app), ["write report", "buy milk"]);
+    press(&mut app, KeyCode::Down)?;
+    assert_eq!(titles(&app), ["done at work"]);
+    press(&mut app, KeyCode::Char('2'))?;
+    assert!(
+        !screen(&app)?.contains("[Work]"),
+        "project lists omit the tag"
+    );
+    press(&mut app, KeyCode::Char('1'))?;
+    assert_eq!(app.selected_filter, 3, "Inbox restores Completed");
+    press(&mut app, KeyCode::Up)?;
+    press(&mut app, KeyCode::Up)?;
+    assert_eq!(app.selected_filter, crate::constants::ALL_FILTER);
+    for key in [KeyCode::Enter, KeyCode::Enter, KeyCode::Char('x')] {
+        press(&mut app, key)?;
+    }
+    let view = app
+        .task_view
+        .as_ref()
+        .expect("project task stays open in Inbox");
+    assert_eq!(view.task.id, report);
+    assert!(view.task.done);
+    assert!(screen(&app)?.contains("Task details: Work"));
+    press(&mut app, KeyCode::Char('m'))?;
+    assert!(screen(&app)?.contains("No project"));
+    press(&mut app, KeyCode::Esc)?;
+    press(&mut app, KeyCode::Esc)?;
+    press(&mut app, KeyCode::Char('a'))?;
+    for character in "new inbox task".chars() {
+        press(&mut app, KeyCode::Char(character))?;
+    }
+    press(&mut app, KeyCode::Enter)?;
+    let added = app
+        .tasks
+        .iter()
+        .find(|task| task.title == "new inbox task")
+        .unwrap();
+    assert_eq!(added.project_id, None);
     Ok(())
 }

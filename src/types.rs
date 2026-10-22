@@ -23,8 +23,9 @@ pub struct Project {
     pub name: String,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Filter {
+    Today,
     All,
     Pending,
     Completed,
@@ -178,6 +179,8 @@ pub struct App {
     pub(crate) input_cursor: crate::editor::TextCursor,
     pub navigation_focused: bool,
     pub selected_filter: usize,
+    /// Inbox filter and selected row, saved while a project list is shown.
+    pub(crate) inbox_state: Option<(usize, usize)>,
     pub mode: Mode,
     pub message: String,
 }

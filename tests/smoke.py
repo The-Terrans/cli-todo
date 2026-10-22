@@ -53,7 +53,9 @@ with tempfile.TemporaryDirectory() as data:
         return screen()
 
     def ready():
-        return wait_for_output(screen, (b"Inbox", b"Tasks", b"?: keybindings"))
+        output = wait_for_output(screen, (b"Inbox", b"Tasks", b"?: keybindings"))
+        # Leave the Today default for All: these scenarios use undated tasks.
+        return output + b" " + send(b"\x1b[B")
 
     def finish(expected):
         assert proc.wait(timeout=3) == expected

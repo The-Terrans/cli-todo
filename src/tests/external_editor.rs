@@ -147,7 +147,7 @@ fn file_format_preserves_description_whitespace_and_task_structure() -> Result<(
 #[test]
 fn private_file_import_is_draft_only_and_success_removes_temporary_data() -> Result<()> {
     let root = TempDirectory::new();
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     app.mode = Mode::Edit(
         None,
         TaskDraft {
@@ -210,7 +210,7 @@ fn invalid_import_keeps_original_draft_and_recovery_file() -> Result<()> {
         b"Title: task\nDue date: impossible\n\n",
         b"\xff",
     ] {
-        let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+        let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
         app.mode = Mode::Edit(
             None,
             TaskDraft {
@@ -270,7 +270,7 @@ fn editor_spawn_and_nonzero_exit_failures_retain_files() -> Result<()> {
 #[test]
 fn recovery_paths_wrap_in_task_popup_errors() -> Result<()> {
     use ratatui::{backend::TestBackend, Terminal};
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     for focus in [TaskField::Title, TaskField::Description, TaskField::DueDate] {
         app.mode = Mode::Edit(
             None,

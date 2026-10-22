@@ -4,6 +4,7 @@ use crate::{
     types::{Filter, Project, SubtaskDraft, Task, TaskDraft},
     Result,
 };
+use chrono::{Local, NaiveDate};
 use rusqlite::{params, Connection};
 use std::{
     collections::{HashMap, HashSet},
@@ -350,7 +351,7 @@ pub fn create_task(db: &Connection, title: &str, project: Option<i64>) -> Result
 pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
     let done = match filter {
         Filter::All => None,
-        Filter::Pending => Some(false),
+        Filter::Today | Filter::Pending => Some(false),
         Filter::Completed => Some(true),
     };
     // Old Git snapshots predate descriptions and remain readable without migration.
@@ -431,11 +432,43 @@ fn set_task_done(db: &Connection, id: i64, done: bool) -> Result<()> {
     Ok(())
 }
 
+/// Lists top-level tasks in `project`, or all top-level tasks (any project or none) when `None`.
 pub fn list_tasks_in(db: &Connection, filter: Filter, project: Option<i64>) -> Result<Vec<Task>> {
+    let due = if filter == Filter::Today {
+        Some(roots_due_by(
+            &list_tasks(db, Filter::All)?,
+            Local::now().date_naive(),
+        ))
+    } else {
+        None
+    };
     Ok(list_tasks(db, filter)?
         .into_iter()
-        .filter(|task| task.parent_id.is_none() && task.project_id == project)
+        .filter(|task| {
+            task.parent_id.is_none()
+                && project.is_none_or(|id| task.project_id == Some(id))
+                && due.as_ref().is_none_or(|due| due.contains(&task.id))
+        })
         .collect())
+}
+
+/// Top-level ids whose task or any descendant is unfinished and due on or before `today`.
+pub fn roots_due_by(tasks: &[Task], today: NaiveDate) -> HashSet<i64> {
+    let parents: HashMap<_, _> = tasks.iter().map(|task| (task.id, task.parent_id)).collect();
+    tasks
+        .iter()
+        .filter(|task| !task.done && task.due_date.is_some_and(|date| date <= today))
+        .map(|task| {
+            let mut id = task.id;
+            for _ in 0..=MAX_SUBTASK_DEPTH {
+                match parents.get(&id) {
+                    Some(Some(parent)) => id = *parent,
+                    _ => break,
+                }
+            }
+            id
+        })
+        .collect()
 }
 
 pub fn move_task(db: &Connection, id: i64, project: Option<i64>) -> Result<()> {

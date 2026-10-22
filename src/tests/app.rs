@@ -638,7 +638,7 @@ fn palette_opens_subtasks_for_rewording_and_nesting_is_bounded() -> Result<()> {
 }
 
 fn app() -> Result<App> {
-    App::new(db::open(Path::new(":memory:"))?)
+    App::new_showing_all(db::open(Path::new(":memory:"))?)
 }
 
 fn search_actions(app: &mut App, query: &str) -> Result<()> {
@@ -832,7 +832,7 @@ fn remote_controls_sync_in_background_and_block_unsafe_pulls() -> Result<()> {
     publisher.push()?;
     let consumer = root.join("consumer");
     fs::create_dir_all(&consumer)?;
-    let mut app = App::new(db::open(&consumer.join("tasks.sqlite3"))?)?;
+    let mut app = App::new_showing_all(db::open(&consumer.join("tasks.sqlite3"))?)?;
     app.handle_key(KeyCode::Char('3'))?;
     app.handle_key(KeyCode::Char('r'))?;
     for character in remote.to_str().unwrap().chars() {
@@ -911,7 +911,7 @@ fn commit_marker_and_no_changes_notification_follow_database_changes() -> Result
     let root = env::temp_dir().join(format!("cli-todo-status-{stamp}"));
     fs::create_dir_all(&root)?;
     let path = root.join("tasks.sqlite3");
-    let mut app = App::new(db::open(&path)?)?;
+    let mut app = App::new_showing_all(db::open(&path)?)?;
     assert!(!app.uncommitted_changes);
     app.handle_key(KeyCode::Char('3'))?;
     app.handle_key(KeyCode::Char('c'))?;
@@ -959,7 +959,7 @@ fn commit_marker_and_no_changes_notification_follow_database_changes() -> Result
     assert!(matches!(app.mode, Mode::Browse));
     assert!(app.navigation_focused && app.commits_focused);
     drop(app);
-    let mut app = App::new(db::open(&path)?)?;
+    let mut app = App::new_showing_all(db::open(&path)?)?;
     assert!(!app.uncommitted_changes);
     assert_eq!(app.commits.len(), 1);
     assert!(!app.commits_focused);
@@ -967,7 +967,7 @@ fn commit_marker_and_no_changes_notification_follow_database_changes() -> Result
     app.handle_key(KeyCode::Char(' '))?;
     assert!(app.uncommitted_changes);
     drop(app);
-    let mut app = App::new(db::open(&path)?)?;
+    let mut app = App::new_showing_all(db::open(&path)?)?;
     assert!(app.uncommitted_changes);
     app.history
         .as_ref()
@@ -1012,7 +1012,7 @@ fn commit_marker_and_no_changes_notification_follow_database_changes() -> Result
     assert_eq!(fs::read_to_string(&backup)?, "existing backup");
     assert!(!app.uncommitted_changes);
     drop(app);
-    let app = App::new(db::open(&path)?)?;
+    let app = App::new_showing_all(db::open(&path)?)?;
     assert!(app.tasks.is_empty() && app.projects.is_empty());
     assert!(app.commits.is_empty());
     assert!(app.remote_url.is_empty());
@@ -1315,14 +1315,14 @@ fn palette_finds_tasks_outside_current_filter() -> Result<()> {
     db::save_task(&app.db, None, "Buy MILK")?;
     let id = app.db.last_insert_rowid();
     db::toggle_task(&app.db, id)?;
-    app.select_filter(1)?;
+    app.select_filter(2)?;
     assert!(app.tasks.is_empty());
     search_actions(&mut app, "milk")?;
     let results = app.palette_results();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].1, Action::OpenTask(id));
     app.handle_key(KeyCode::Enter)?;
-    assert_eq!(app.selected_filter, 0);
+    assert_eq!(app.selected_filter, ALL_FILTER);
     assert_eq!(app.tasks[app.selected_task].id, id);
     assert!(!app.navigation_focused);
     app.handle_key(KeyCode::Char('e'))?;
@@ -1334,11 +1334,11 @@ fn palette_finds_tasks_outside_current_filter() -> Result<()> {
 fn palette_search_and_arrows_select_a_filter() -> Result<()> {
     let mut app = app()?;
     search_actions(&mut app, " SHOW ")?;
-    assert_eq!(app.palette_actions().len(), 3);
+    assert_eq!(app.palette_actions().len(), 4);
     for _ in 0..10 {
         app.handle_key(KeyCode::Down)?;
     }
-    assert!(matches!(app.mode, Mode::Palette { selected: 2, .. }));
+    assert!(matches!(app.mode, Mode::Palette { selected: 3, .. }));
     app.handle_key(KeyCode::Backspace)?;
     assert!(matches!(app.mode, Mode::Palette { selected: 0, .. }));
     app.handle_key(KeyCode::Down)?;
@@ -1368,6 +1368,7 @@ fn palette_handles_no_matches_and_requires_enter_to_quit() -> Result<()> {
             Action::ShowFilter(0),
             Action::ShowFilter(1),
             Action::ShowFilter(2),
+            Action::ShowFilter(3),
             Action::ResetHistory,
             Action::Quit
         ]
@@ -1519,10 +1520,14 @@ fn navigation_wraps_filters_and_clamps_task_selection() -> Result<()> {
     db::save_task(&app.db, None, "second")?;
     app.refresh_tasks()?;
     app.handle_key(KeyCode::Up)?;
-    assert_eq!(app.selected_filter, 2);
+    assert_eq!(app.selected_filter, 0);
+    assert!(app.tasks.is_empty(), "undated tasks are not due today");
+    app.handle_key(KeyCode::Up)?;
+    assert_eq!(app.selected_filter, 3);
     assert!(app.tasks.is_empty());
     app.handle_key(KeyCode::Down)?;
-    assert_eq!(app.selected_filter, 0);
+    app.handle_key(KeyCode::Down)?;
+    assert_eq!(app.selected_filter, ALL_FILTER);
     app.handle_key(KeyCode::Enter)?;
     assert!(!app.navigation_focused);
     app.handle_key(KeyCode::Up)?;
@@ -1533,10 +1538,10 @@ fn navigation_wraps_filters_and_clamps_task_selection() -> Result<()> {
     app.handle_key(KeyCode::Esc)?;
     assert!(app.navigation_focused);
     app.handle_key(KeyCode::Down)?;
-    assert_eq!(app.selected_filter, 1);
+    assert_eq!(app.selected_filter, 2);
     assert_eq!(app.selected_task, 0);
     app.handle_key(KeyCode::Up)?;
-    assert_eq!(app.selected_filter, 0);
+    assert_eq!(app.selected_filter, ALL_FILTER);
     Ok(())
 }
 
@@ -1655,6 +1660,107 @@ fn alt_j_and_k_reorder_tasks_and_focused_subtasks() -> Result<()> {
             .map(|child| child.draft.title.as_str())
             .collect::<Vec<_>>(),
         ["child b", "child a"]
+    );
+    Ok(())
+}
+
+#[test]
+fn today_is_the_default_inbox_filter_and_projects_open_on_all() -> Result<()> {
+    let today = chrono::Local::now().date_naive();
+    let db = db::open(Path::new(":memory:"))?;
+    db::save_project(&db, None, "Work")?;
+    let work = db.last_insert_rowid();
+    for (title, due, project) in [
+        ("due today", today.to_string(), Some(work)),
+        ("overdue", (today - chrono::Days::new(3)).to_string(), None),
+        (
+            "later",
+            (today + chrono::Days::new(3)).to_string(),
+            Some(work),
+        ),
+        ("undated", String::new(), None),
+    ] {
+        db::save_task_tree(
+            &db,
+            None,
+            &TaskDraft {
+                title: title.into(),
+                due_date: due,
+                ..TaskDraft::default()
+            },
+            project,
+        )?;
+    }
+    let mut app = App::new(db)?;
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    assert_eq!(FILTERS[app.selected_filter].1, Filter::Today);
+    assert_eq!(titles(&app), ["due today", "overdue"]);
+    app.handle_key(KeyCode::Char('2'))?;
+    assert_eq!(app.selected_filter, ALL_FILTER);
+    assert_eq!(titles(&app), ["due today", "later"]);
+    app.handle_key(KeyCode::Char('1'))?;
+    app.select_filter(0)?;
+    app.handle_key(KeyCode::Char('a'))?;
+    for character in "no date".chars() {
+        app.handle_key(KeyCode::Char(character))?;
+    }
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.message, "Added to All — not due today");
+    assert_eq!(titles(&app), ["due today", "overdue"]);
+    app.handle_key(KeyCode::Char('a'))?;
+    for character in "call bob today".chars() {
+        app.handle_key(KeyCode::Char(character))?;
+    }
+    app.handle_key(KeyCode::Enter)?;
+    assert!(app.message.is_empty());
+    assert_eq!(titles(&app), ["due today", "overdue", "call bob"]);
+    search_actions(&mut app, "today's")?;
+    assert_eq!(app.palette_actions()[0].1, Action::ShowFilter(0));
+    Ok(())
+}
+
+#[test]
+fn inbox_restores_its_filter_and_row_after_visiting_projects() -> Result<()> {
+    let mut app = app()?;
+    db::save_project(&app.db, None, "Work")?;
+    let work = app.db.last_insert_rowid();
+    for title in ["first", "second", "third"] {
+        db::save_task(&app.db, None, title)?;
+    }
+    db::create_task(&app.db, "project task", Some(work))?;
+    app.refresh_projects()?;
+    app.handle_key(KeyCode::Down)?;
+    assert_eq!(app.selected_filter, 2, "Pending");
+    app.handle_key(KeyCode::Enter)?;
+    app.handle_key(KeyCode::Down)?;
+    app.handle_key(KeyCode::Down)?;
+    let inbox = (app.selected_filter, app.selected_task);
+    assert_eq!(inbox, (2, 2));
+    app.handle_key(KeyCode::Char('2'))?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.selected_filter, ALL_FILTER);
+    assert_eq!(app.selected_task, 0);
+    app.handle_key(KeyCode::Char('3'))?;
+    app.handle_key(KeyCode::Char('2'))?;
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!((app.selected_filter, app.selected_task), inbox);
+    assert_eq!(app.current_project, None);
+    app.handle_key(KeyCode::Char('3'))?;
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!(
+        (app.selected_filter, app.selected_task),
+        inbox,
+        "Commits keeps Inbox state"
+    );
+    search_actions(&mut app, "project task")?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.current_project, Some(work));
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!(
+        (app.selected_filter, app.selected_task),
+        inbox,
+        "palette jumps keep Inbox state"
     );
     Ok(())
 }

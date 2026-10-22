@@ -2,11 +2,15 @@ use crate::types::{Action, Filter};
 
 pub const MAX_SUBTASK_DEPTH: usize = 64;
 
-pub const FILTERS: [(&str, Filter); 3] = [
+pub const FILTERS: [(&str, Filter); 4] = [
+    ("Today", Filter::Today),
     ("All", Filter::All),
     ("Pending", Filter::Pending),
     ("Completed", Filter::Completed),
 ];
+
+/// Index of the All filter, used when a task must be visible regardless of status or date.
+pub const ALL_FILTER: usize = 1;
 
 pub const KEYBINDINGS: &[&str] = &[
     "BROWSING",
@@ -30,7 +34,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  PageUp/Down   Scroll opened task details (Home/End jump)",
     "  Space         Complete/reopen task (Tasks only)",
     "  d             Delete task/project with confirmation",
-    "  m             Move task to Inbox/project (Tasks only)",
+    "  m             Move task to a project or No project",
     "  Alt+J / Alt+K Move selected task down/up in the list",
     "  Shift+D       Nuke all data, local commits and remote settings",
     "",
@@ -82,15 +86,16 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Tab/Shift+Tab Cycles panel focus in browsing; popup fields in editor",
 ];
 
-pub(crate) const ACTIONS: [(&str, Action); 10] = [
+pub(crate) const ACTIONS: [(&str, Action); 11] = [
     ("Add task", Action::Add),
     ("Edit selected task", Action::Edit),
     ("Complete / reopen selected task", Action::ToggleCompletion),
     ("Delete selected task", Action::Delete),
     ("Move selected task", Action::Move),
-    ("Show all tasks", Action::ShowFilter(0)),
-    ("Show pending tasks", Action::ShowFilter(1)),
-    ("Show completed tasks", Action::ShowFilter(2)),
+    ("Show today's tasks", Action::ShowFilter(0)),
+    ("Show all tasks", Action::ShowFilter(ALL_FILTER)),
+    ("Show pending tasks", Action::ShowFilter(2)),
+    ("Show completed tasks", Action::ShowFilter(3)),
     ("Reset todo history", Action::ResetHistory),
     ("Quit", Action::Quit),
 ];

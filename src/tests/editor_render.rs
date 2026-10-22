@@ -31,7 +31,7 @@ fn assert_no_marker(buffer: &Buffer) {
 
 #[test]
 fn native_cursor_moves_over_letters_without_moving_editor_text() -> crate::types::Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     app.mode = Mode::Edit(
         None,
         TaskDraft {
@@ -177,7 +177,7 @@ fn wrapped_native_cursor_matches_words_newlines_and_wide_characters() {
 
 #[test]
 fn compact_dialogs_keep_text_fixed_and_scroll_to_native_cursor() -> crate::types::Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     for mode in [
         Mode::RemoteEdit("url".into()),
         Mode::CommitEdit("msg".into()),
@@ -227,7 +227,7 @@ fn compact_dialogs_keep_text_fixed_and_scroll_to_native_cursor() -> crate::types
 
 #[test]
 fn scrolling_keeps_description_cursor_visible() -> crate::types::Result<()> {
-    let mut app = App::new(db::open(Path::new(":memory:"))?)?;
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
     app.mode = Mode::Edit(
         None,
         TaskDraft {

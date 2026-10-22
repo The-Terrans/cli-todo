@@ -1,5 +1,5 @@
 use crate::{
-    constants::{ACTIONS, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH},
+    constants::{ACTIONS, ALL_FILTER, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH},
     dates::{date_phrases, parse_due_date, remove_date_phrase},
     db,
     types::{
@@ -40,6 +40,7 @@ impl App {
             input_cursor: crate::editor::TextCursor::default(),
             navigation_focused: true,
             selected_filter: 0,
+            inbox_state: None,
             mode: Mode::Browse,
             message: String::new(),
             db,
@@ -48,6 +49,14 @@ impl App {
         app.reload_commits();
         app.load_remote();
         app.update_commit_status();
+        Ok(app)
+    }
+
+    /// Starts on the All filter, as before Today became the default.
+    #[cfg(test)]
+    pub(crate) fn new_showing_all(db: Connection) -> Result<Self> {
+        let mut app = Self::new(db)?;
+        app.select_filter(ALL_FILTER)?;
         Ok(app)
     }
 
@@ -121,10 +130,12 @@ impl App {
         );
         let tasks = db::list_tasks(&self.db, Filter::All)?;
         loop {
-            if let Some(task) = tasks
-                .iter()
-                .find(|task| task.id == id && task.project_id == self.current_project)
-            {
+            if let Some(task) = tasks.iter().find(|task| {
+                task.id == id
+                    && self
+                        .current_project
+                        .is_none_or(|project| task.project_id == Some(project))
+            }) {
                 let children: Vec<_> = tasks
                     .iter()
                     .filter(|child| child.parent_id == Some(id))
@@ -476,6 +487,7 @@ impl App {
                 self.palette_tasks.clear();
                 self.selected_project = 0;
                 self.selected_filter = 0;
+                self.inbox_state = None;
                 self.mode = Mode::Browse;
                 self.focus_inbox()?;
                 self.selected_commit = 0;
@@ -533,10 +545,22 @@ impl App {
         self.projects_focused = false;
         self.commits_focused = false;
         self.current_project = None;
+        if let Some((filter, task)) = self.inbox_state.take() {
+            self.selected_filter = filter;
+            self.selected_task = task;
+        }
         self.refresh_tasks()
     }
 
+    /// Saves Inbox's filter and row before a project list replaces it.
+    fn leave_inbox(&mut self) {
+        if self.inbox_state.is_none() {
+            self.inbox_state = Some((self.selected_filter, self.selected_task));
+        }
+    }
+
     fn focus_projects(&mut self) -> Result<()> {
+        self.leave_inbox();
         self.navigation_focused = true;
         self.projects_focused = true;
         self.commits_focused = false;
@@ -844,7 +868,7 @@ impl App {
             .projects
             .get(self.selected_project)
             .map(|project| project.id);
-        self.select_filter(0)
+        self.select_filter(ALL_FILTER)
     }
 
     fn handle_navigation_key(&mut self, key: KeyCode) -> Result<()> {
@@ -971,18 +995,28 @@ impl App {
             }
             Action::OpenTask(id) => {
                 self.commits_focused = false;
-                if let Some(task) = self.palette_tasks.iter().find(|task| task.id == id) {
-                    self.current_project = task.project_id;
-                    self.projects_focused = task.project_id.is_some();
+                if let Some(project) = self
+                    .palette_tasks
+                    .iter()
+                    .find(|task| task.id == id)
+                    .map(|task| task.project_id)
+                {
+                    if project.is_some() {
+                        self.leave_inbox();
+                    } else {
+                        self.inbox_state = None;
+                    }
+                    self.current_project = project;
+                    self.projects_focused = project.is_some();
                     if let Some(index) = self
                         .projects
                         .iter()
-                        .position(|project| Some(project.id) == task.project_id)
+                        .position(|candidate| Some(candidate.id) == project)
                     {
                         self.selected_project = index;
                     }
                 }
-                self.select_filter(0)?;
+                self.select_filter(ALL_FILTER)?;
                 if let Some(index) = self.tasks.iter().position(|task| task.id == id) {
                     self.selected_task = index;
                 }
@@ -1269,7 +1303,15 @@ impl App {
             return Err(error);
         }
         let added_child = self.new_task_parent.take().is_some();
+        let listed = self.tasks.len();
         self.refresh_tasks()?;
+        if id.is_none()
+            && !added_child
+            && FILTERS[self.selected_filter].1 == Filter::Today
+            && self.tasks.len() == listed
+        {
+            self.message = "Added to All — not due today".into();
+        }
         if added_child {
             if let Some(view) = &mut self.task_view {
                 view.selected_child = view.children.len().saturating_sub(1);
@@ -1319,7 +1361,7 @@ impl App {
             KeyCode::Enter => {
                 if let Some(project) = self.projects.get(self.selected_project) {
                     self.current_project = Some(project.id);
-                    self.select_filter(0)?;
+                    self.select_filter(ALL_FILTER)?;
                     self.navigation_focused = false;
                 }
             }
