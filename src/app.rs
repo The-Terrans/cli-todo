@@ -427,6 +427,8 @@ impl App {
         match key {
             KeyCode::Char('?') => self.mode = Mode::Help { scroll: 0 },
             KeyCode::Char('c') => self.begin_commit(),
+            KeyCode::Char('p') => self.start_sync(true),
+            KeyCode::Char('P') => self.start_sync(false),
             KeyCode::Char('D') => self.begin_nuke()?,
             KeyCode::Tab | KeyCode::BackTab => {
                 self.navigation_focused = !self.navigation_focused;
@@ -678,8 +680,6 @@ impl App {
         }
         match key {
             KeyCode::Char('r') => self.begin_remote_edit(),
-            KeyCode::Char('p') => self.start_sync(false),
-            KeyCode::Char('P') => self.start_sync(true),
             KeyCode::Up => {
                 self.selected_commit = self.selected_commit.saturating_sub(1);
                 self.preview_commit();

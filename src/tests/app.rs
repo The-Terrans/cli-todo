@@ -840,7 +840,7 @@ fn remote_controls_sync_in_background_and_block_unsafe_pulls() -> Result<()> {
     }
     app.handle_key(KeyCode::Enter)?;
     assert_eq!(app.remote_url, remote.to_str().unwrap());
-    app.handle_key(KeyCode::Char('P'))?;
+    app.handle_key(KeyCode::Char('p'))?;
     assert!(app.sync_receiver.is_some());
     app.handle_key(KeyCode::Char('r'))?;
     assert!(matches!(app.mode, Mode::Browse));
@@ -856,16 +856,17 @@ fn remote_controls_sync_in_background_and_block_unsafe_pulls() -> Result<()> {
     assert!(app.message.contains("pulled and applied"));
     assert!(matches!(app.mode, Mode::Help { .. }));
     app.handle_key(KeyCode::Esc)?;
-    app.handle_key(KeyCode::Char('3'))?;
-    app.handle_key(KeyCode::Char('p'))?;
+    app.handle_key(KeyCode::Char('P'))?;
     wait_for_sync(&mut app);
-    assert_eq!(app.message, "Todo checkpoints pushed");
+    assert_eq!(
+        app.message, "Todo checkpoints pushed",
+        "push works from Inbox"
+    );
     app.handle_key(KeyCode::Char('1'))?;
     app.handle_key(KeyCode::Char('a'))?;
     app.handle_key(KeyCode::Char('x'))?;
     app.handle_key(KeyCode::Enter)?;
-    app.handle_key(KeyCode::Char('3'))?;
-    app.handle_key(KeyCode::Char('P'))?;
+    app.handle_key(KeyCode::Char('p'))?;
     assert!(app.sync_receiver.is_none());
     assert!(app.message.contains("Commit your todo changes"));
     db::delete_task(&app.db, app.db.last_insert_rowid())?;
@@ -873,7 +874,7 @@ fn remote_controls_sync_in_background_and_block_unsafe_pulls() -> Result<()> {
     db::save_task(&publisher_db, None, "new remote task")?;
     publisher.commit(&publisher_db, "second checkpoint")?;
     publisher.push()?;
-    app.handle_key(KeyCode::Char('P'))?;
+    app.handle_key(KeyCode::Char('p'))?;
     app.handle_key(KeyCode::Char('1'))?;
     app.handle_key(KeyCode::Char('a'))?;
     app.handle_key(KeyCode::Char('y'))?;
@@ -893,7 +894,7 @@ fn remote_controls_sync_in_background_and_block_unsafe_pulls() -> Result<()> {
     app.mode = Mode::RemoteEdit(String::new());
     app.handle_key(KeyCode::Enter)?;
     assert!(app.remote_url.is_empty());
-    app.handle_key(KeyCode::Char('p'))?;
+    app.handle_key(KeyCode::Char('P'))?;
     wait_for_sync(&mut app);
     assert!(app.message.contains("Configure origin"));
     drop(app);
@@ -1762,5 +1763,41 @@ fn inbox_restores_its_filter_and_row_after_visiting_projects() -> Result<()> {
         inbox,
         "palette jumps keep Inbox state"
     );
+    Ok(())
+}
+
+#[test]
+fn p_pulls_and_shift_p_pushes_from_every_browsing_panel() -> Result<()> {
+    let mut app = app()?;
+    db::save_project(&app.db, None, "Work")?;
+    db::create_task(&app.db, "task", Some(app.db.last_insert_rowid()))?;
+    app.refresh_projects()?;
+    let panels: [&[KeyCode]; 6] = [
+        &[KeyCode::Char('1')],
+        &[KeyCode::Char('0')],
+        &[KeyCode::Char('0'), KeyCode::Enter],
+        &[KeyCode::Char('2')],
+        &[KeyCode::Char('3')],
+        &[KeyCode::Char('3'), KeyCode::Enter],
+    ];
+    for keys in panels {
+        for (key, expected) in [
+            ('p', "Commit your todo changes before pulling"),
+            ('P', "Todo history requires a file-backed database"),
+        ] {
+            app.handle_key(KeyCode::Char('1'))?;
+            for key in keys {
+                app.handle_key(*key)?;
+            }
+            app.handle_key(KeyCode::Char(key))?;
+            assert_eq!(app.message, expected, "{key} after {keys:?}");
+            assert!(matches!(app.mode, Mode::Browse));
+        }
+    }
+    app.handle_key(KeyCode::Char('1'))?;
+    app.handle_key(KeyCode::Char('a'))?;
+    app.handle_key(KeyCode::Char('p'))?;
+    app.handle_key(KeyCode::Char('P'))?;
+    assert!(matches!(&app.mode, Mode::Edit(None, draft) if draft.title == "pP"));
     Ok(())
 }
