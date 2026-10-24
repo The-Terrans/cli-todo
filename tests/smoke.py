@@ -182,7 +182,7 @@ with tempfile.TemporaryDirectory() as data:
         subprocess.run(["git", "init", "--bare", "--quiet", f"--initial-branch={branch}", str(remote)], check=True)
         send(b"r" + str(remote).encode() + b"\r")
         assert subprocess.check_output(["git", "-C", str(history), "remote", "get-url", "origin"]).decode().strip() == str(remote)
-        send(b"p")
+        send(b"P")
         deadline = time.monotonic() + 5
         head = subprocess.check_output(["git", "-C", str(history), "rev-parse", "HEAD"]).strip()
         while True:
@@ -193,7 +193,8 @@ with tempfile.TemporaryDirectory() as data:
             time.sleep(0.05)
         screen()
         deadline = time.monotonic() + 5
-        output = send(b"P")
+        send(b"1")
+        output = send(b"p")
         while b"up to date" not in output:
             assert time.monotonic() < deadline, "pull did not finish"
             output += screen()

@@ -112,7 +112,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Alt+J / Alt+K in Tasks       | Move selected task or focused subtask down/up; order is saved |
 | c while browsing             | Commit a safe todo SQLite snapshot from any panel         |
 | r in Commits                 | Set/change origin URL; empty input removes it             |
-| p / P in Commits             | Push checkpoints / safely pull and apply a snapshot       |
+| p / P while browsing         | Safely pull and apply a snapshot / push checkpoints, from any panel |
 | Enter in deletion dialog     | Confirm permanent deletion                               |
 | Esc in deletion dialog       | Cancel deletion                                          |
 | Enter in text entry          | Save title; in task Description, insert newline           |
@@ -241,8 +241,8 @@ All todos, subtasks, descriptions, due dates, completion states, and projects ar
 
 Create an empty **private** GitHub repository, then press **3 → r**, enter its SSH or HTTPS URL, and press Enter. **r** also changes origin; erase the URL and save to remove it. Removing origin does not delete local checkpoints. The configured URL appears in the right preview. The remote input uses the compact layout: 3 rows (4 with an error), 70% width with a 60-column minimum, and Enter/Esc in the bottom-right border. Long URLs scroll horizontally; the title reminds you that blank input removes origin.
 
-- **p: Push** uploads committed snapshots only, even if newer tasks are uncommitted. It never force-pushes.
-- **P: Pull** fetches remote history and applies its latest SQLite snapshot only when local todo data and Git files are clean and history can fast-forward. Local-ahead history is left alone; divergent history is refused.
+- **p: Pull** fetches remote history and applies its latest SQLite snapshot only when local todo data and Git files are clean and history can fast-forward. Local-ahead history is left alone; divergent history is refused.
+- **Shift+P: Push** uploads committed snapshots only, even if newer tasks are uncommitted. It never force-pushes.
 - Before replacement, the snapshot is checked for SQLite integrity, compatible tables, and project references. The live database is backed up to `cli-todo/backups/before-pull-<timestamp>.sqlite3`. If Git integration fails, the original database is restored from that backup.
 - Git authentication must already work outside the app (SSH keys or your Git credential manager). The app does not store tokens or prompt for passwords. Do not embed tokens in the remote URL.
 
