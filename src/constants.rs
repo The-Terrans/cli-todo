@@ -44,7 +44,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  d             Delete task/project with confirmation",
     "  m             Move task to a project or No project",
     "  f             Filter a project's tasks: Today/All/Pending/Completed",
-    "  r             Sort pending tasks per project/Inbox; saved across restarts",
+    "  r             Sort pending tasks per project / Inbox filter; saved",
     "  Alt+J / Alt+K Move selected pending task down/up (Manual order)",
     "  Alt+Down/Up   Same as Alt+J / Alt+K",
     "  Shift+D       Nuke all data, local commits and remote settings",

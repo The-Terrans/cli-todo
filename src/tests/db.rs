@@ -515,7 +515,7 @@ fn lists_put_completed_tasks_last_newest_first_and_sort_pending_by_creation() ->
 }
 
 #[test]
-fn sorts_are_saved_per_list_survive_reopening_and_go_with_their_project() -> Result<()> {
+fn sorts_are_saved_per_project_and_inbox_filter_and_survive_reopening() -> Result<()> {
     let stamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_nanos();
@@ -525,35 +525,52 @@ fn sorts_are_saved_per_list_survive_reopening_and_go_with_their_project() -> Res
         save_project(&db, None, name)?;
     }
     let (work, home) = (1, 2);
-    save_sort(&db, Some(work), Sort::CreatedDesc)?;
-    save_sort(&db, None, Sort::CreatedAsc)?;
+    save_sort(&db, Some(work), Filter::All, Sort::CreatedDesc)?;
+    save_sort(&db, None, Filter::Today, Sort::CreatedAsc)?;
     assert_eq!(
-        load_sort(&db, Some(home))?,
+        load_sort(&db, Some(home), Filter::All)?,
         Sort::Manual,
         "other projects keep Manual"
     );
+    for filter in [Filter::All, Filter::Pending, Filter::Completed] {
+        assert_eq!(
+            load_sort(&db, None, filter)?,
+            Sort::Manual,
+            "{filter:?} is not sorted by Today's choice"
+        );
+    }
     drop(db);
     let db = open(&path)?;
-    assert_eq!(load_sort(&db, Some(work))?, Sort::CreatedDesc);
     assert_eq!(
-        load_sort(&db, None)?,
-        Sort::CreatedAsc,
-        "Inbox has its own sort"
+        load_sort(&db, Some(work), Filter::Completed)?,
+        Sort::CreatedDesc,
+        "a project shares one sort across filters"
     );
-    save_sort(&db, Some(work), Sort::CreatedAsc)?;
+    assert_eq!(load_sort(&db, None, Filter::Today)?, Sort::CreatedAsc);
+    save_sort(&db, None, Filter::All, Sort::CreatedDesc)?;
+    assert_eq!(load_sort(&db, None, Filter::All)?, Sort::CreatedDesc);
+    assert_eq!(load_sort(&db, None, Filter::Today)?, Sort::CreatedAsc);
+    save_sort(&db, Some(work), Filter::Pending, Sort::CreatedAsc)?;
     assert_eq!(
-        load_sort(&db, Some(work))?,
+        load_sort(&db, Some(work), Filter::All)?,
         Sort::CreatedAsc,
         "saving replaces"
     );
-    save_sort(&db, None, Sort::Manual)?;
-    assert_eq!(load_sort(&db, None)?, Sort::Manual);
+    save_sort(&db, None, Filter::Today, Sort::Manual)?;
+    assert_eq!(load_sort(&db, None, Filter::Today)?, Sort::Manual);
     delete_project(&db, work)?;
-    let rows: i64 = db.query_row("SELECT COUNT(*) FROM sorts", [], |row| row.get(0))?;
+    let rows: i64 = db.query_row(
+        "SELECT COUNT(*) FROM list_sorts WHERE project_id IS NOT NULL",
+        [],
+        |row| row.get(0),
+    )?;
     assert_eq!(rows, 0, "deleting a project drops its sort");
-    save_sort(&db, None, Sort::CreatedDesc)?;
     nuke(&db)?;
-    assert_eq!(load_sort(&db, None)?, Sort::Manual, "nuke resets sorts");
+    assert_eq!(
+        load_sort(&db, None, Filter::All)?,
+        Sort::Manual,
+        "nuke resets sorts"
+    );
     drop(db);
     fs::remove_file(path)?;
     Ok(())

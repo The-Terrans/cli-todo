@@ -94,15 +94,32 @@ pub fn migrate_completed_at(db: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Saved list sorts; a NULL project is Inbox. Manual order has no row.
+/// Saved list sorts: one row per project (NULL filter) and one per Inbox filter (NULL
+/// project). Manual order has no row.
 pub fn migrate_sorts(db: &Connection) -> Result<()> {
     db.execute_batch(
-        "CREATE TABLE IF NOT EXISTS sorts (
-            project_id INTEGER UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
-            sort TEXT NOT NULL
+        "CREATE TABLE IF NOT EXISTS list_sorts (
+            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+            filter TEXT,
+            sort TEXT NOT NULL,
+            UNIQUE(project_id, filter)
         );",
     )?;
     Ok(())
+}
+
+/// A project shares one sort across its filters; each Inbox filter has its own.
+fn sort_list(project: Option<i64>, filter: Filter) -> (Option<i64>, Option<&'static str>) {
+    if project.is_some() {
+        return (project, None);
+    }
+    let name = match filter {
+        Filter::Today => "today",
+        Filter::All => "all",
+        Filter::Pending => "pending",
+        Filter::Completed => "completed",
+    };
+    (None, Some(name))
 }
 
 const SORT_NAMES: [(Sort, &str); 2] = [
@@ -110,12 +127,14 @@ const SORT_NAMES: [(Sort, &str); 2] = [
     (Sort::CreatedDesc, "created_desc"),
 ];
 
-/// Returns the saved sort for `project`, or Inbox when `None`; unknown names fall back to Manual.
-pub fn load_sort(db: &Connection, project: Option<i64>) -> Result<Sort> {
+/// Returns the saved sort for `project`, or Inbox's `filter` when `None`; unknown names fall
+/// back to Manual.
+pub fn load_sort(db: &Connection, project: Option<i64>, filter: Filter) -> Result<Sort> {
+    let (project, filter) = sort_list(project, filter);
     let name: Option<String> = db
         .query_row(
-            "SELECT sort FROM sorts WHERE project_id IS ?1",
-            [project],
+            "SELECT sort FROM list_sorts WHERE project_id IS ?1 AND filter IS ?2",
+            params![project, filter],
             |row| row.get(0),
         )
         .optional()?;
@@ -125,13 +144,17 @@ pub fn load_sort(db: &Connection, project: Option<i64>) -> Result<Sort> {
         .map_or(Sort::Manual, |(sort, _)| *sort))
 }
 
-pub fn save_sort(db: &Connection, project: Option<i64>, sort: Sort) -> Result<()> {
+pub fn save_sort(db: &Connection, project: Option<i64>, filter: Filter, sort: Sort) -> Result<()> {
+    let (project, filter) = sort_list(project, filter);
     let transaction = db.unchecked_transaction()?;
-    transaction.execute("DELETE FROM sorts WHERE project_id IS ?1", [project])?;
+    transaction.execute(
+        "DELETE FROM list_sorts WHERE project_id IS ?1 AND filter IS ?2",
+        params![project, filter],
+    )?;
     if let Some((_, name)) = SORT_NAMES.iter().find(|(saved, _)| *saved == sort) {
         transaction.execute(
-            "INSERT INTO sorts(project_id,sort) VALUES (?1,?2)",
-            params![project, name],
+            "INSERT INTO list_sorts(project_id,filter,sort) VALUES (?1,?2,?3)",
+            params![project, filter, name],
         )?;
     }
     transaction.commit()?;
@@ -593,7 +616,7 @@ pub fn save_project(db: &Connection, id: Option<i64>, name: &str) -> Result<()> 
 pub fn nuke(db: &Connection) -> Result<()> {
     let transaction = db.unchecked_transaction()?;
     transaction.execute("DELETE FROM tasks", [])?;
-    transaction.execute("DELETE FROM sorts", [])?;
+    transaction.execute("DELETE FROM list_sorts", [])?;
     transaction.execute("DELETE FROM projects", [])?;
     transaction.commit()?;
     Ok(())

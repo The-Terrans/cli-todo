@@ -198,7 +198,7 @@ pub struct App {
     pub(crate) input_cursor: crate::editor::TextCursor,
     pub navigation_focused: bool,
     pub selected_filter: usize,
-    /// Saved sort of the shown list, reloaded with it.
+    /// Saved sort of the shown project or Inbox filter, reloaded with the list.
     pub sort: Sort,
     /// Inbox filter and selected row, saved while a project list is shown.
     pub(crate) inbox_state: Option<(usize, usize)>,

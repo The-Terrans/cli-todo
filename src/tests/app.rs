@@ -1828,6 +1828,20 @@ fn each_list_keeps_its_own_sort() -> Result<()> {
         Sort::Manual,
         "Inbox is not sorted by Work's choice"
     );
+    keys(
+        &mut app,
+        &[KeyCode::Char('r'), KeyCode::Down, KeyCode::Enter],
+    )?;
+    assert_eq!(app.sort, Sort::CreatedAsc);
+    app.handle_key(KeyCode::Up)?;
+    assert_eq!(app.selected_filter, 0);
+    assert_eq!(
+        app.sort,
+        Sort::Manual,
+        "Today is not sorted by All's choice"
+    );
+    app.handle_key(KeyCode::Down)?;
+    assert_eq!(app.sort, Sort::CreatedAsc, "All keeps its sort");
     keys(&mut app, &[KeyCode::Char('2'), KeyCode::Up])?;
     assert_eq!(app.sort, Sort::CreatedDesc, "Work keeps its sort");
     assert_eq!(titles(&app), ["work b", "work a"]);

@@ -103,13 +103,9 @@ impl App {
         (self.sort, self.tasks) = if self.projects_focused && self.current_project.is_none() {
             (Sort::Manual, vec![])
         } else {
-            let sort = db::load_sort(&self.db, self.current_project)?;
-            let tasks = db::list_tasks_in(
-                &self.db,
-                FILTERS[self.selected_filter].1,
-                self.current_project,
-                sort,
-            )?;
+            let filter = FILTERS[self.selected_filter].1;
+            let sort = db::load_sort(&self.db, self.current_project, filter)?;
+            let tasks = db::list_tasks_in(&self.db, filter, self.current_project, sort)?;
             (sort, tasks)
         };
         self.selected_task = self.selected_task.min(self.tasks.len().saturating_sub(1));
@@ -954,7 +950,12 @@ impl App {
             KeyCode::Enter => {
                 let sort = SORTS[*selected].1;
                 self.mode = Mode::Browse;
-                db::save_sort(&self.db, self.current_project, sort)?;
+                db::save_sort(
+                    &self.db,
+                    self.current_project,
+                    FILTERS[self.selected_filter].1,
+                    sort,
+                )?;
                 self.selected_task = 0;
                 self.refresh_tasks()?;
             }
