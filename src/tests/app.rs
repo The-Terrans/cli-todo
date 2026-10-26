@@ -1801,6 +1801,40 @@ fn sort_popup_orders_pending_tasks_and_limits_reordering_to_manual_order() -> Re
 }
 
 #[test]
+fn each_list_keeps_its_own_sort() -> Result<()> {
+    let mut app = app()?;
+    for name in ["Work", "Home"] {
+        db::save_project(&app.db, None, name)?;
+    }
+    for (title, project) in [("work a", 1), ("work b", 1), ("home a", 2), ("home b", 2)] {
+        db::create_task(&app.db, title, Some(project))?;
+    }
+    app.refresh_projects()?;
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    keys(&mut app, &[KeyCode::Char('2'), KeyCode::Char('r')])?;
+    keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter])?;
+    assert_eq!(titles(&app), ["work b", "work a"]);
+    keys(&mut app, &[KeyCode::Char('2'), KeyCode::Down])?;
+    assert_eq!(
+        app.sort,
+        Sort::Manual,
+        "Home is not sorted by Work's choice"
+    );
+    assert_eq!(titles(&app), ["home a", "home b"]);
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!(
+        app.sort,
+        Sort::Manual,
+        "Inbox is not sorted by Work's choice"
+    );
+    keys(&mut app, &[KeyCode::Char('2'), KeyCode::Up])?;
+    assert_eq!(app.sort, Sort::CreatedDesc, "Work keeps its sort");
+    assert_eq!(titles(&app), ["work b", "work a"]);
+    Ok(())
+}
+
+#[test]
 fn today_is_the_default_inbox_filter_and_projects_open_on_all() -> Result<()> {
     let today = chrono::Local::now().date_naive();
     let db = db::open(Path::new(":memory:"))?;

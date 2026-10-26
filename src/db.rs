@@ -5,7 +5,7 @@ use crate::{
     Result,
 };
 use chrono::{Local, NaiveDate};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -42,6 +42,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     migrate_due_dates(&db)?;
     migrate_positions(&db)?;
     migrate_completed_at(&db)?;
+    migrate_sorts(&db)?;
     validate_hierarchy(&db)?;
     Ok(db)
 }
@@ -90,6 +91,50 @@ pub fn migrate_completed_at(db: &Connection) -> Result<()> {
     if !has_column(db, "completed_at")? {
         db.execute_batch("ALTER TABLE tasks ADD COLUMN completed_at TEXT;")?;
     }
+    Ok(())
+}
+
+/// Saved list sorts; a NULL project is Inbox. Manual order has no row.
+pub fn migrate_sorts(db: &Connection) -> Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sorts (
+            project_id INTEGER UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+            sort TEXT NOT NULL
+        );",
+    )?;
+    Ok(())
+}
+
+const SORT_NAMES: [(Sort, &str); 2] = [
+    (Sort::CreatedAsc, "created_asc"),
+    (Sort::CreatedDesc, "created_desc"),
+];
+
+/// Returns the saved sort for `project`, or Inbox when `None`; unknown names fall back to Manual.
+pub fn load_sort(db: &Connection, project: Option<i64>) -> Result<Sort> {
+    let name: Option<String> = db
+        .query_row(
+            "SELECT sort FROM sorts WHERE project_id IS ?1",
+            [project],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(SORT_NAMES
+        .iter()
+        .find(|(_, saved)| Some(*saved) == name.as_deref())
+        .map_or(Sort::Manual, |(sort, _)| *sort))
+}
+
+pub fn save_sort(db: &Connection, project: Option<i64>, sort: Sort) -> Result<()> {
+    let transaction = db.unchecked_transaction()?;
+    transaction.execute("DELETE FROM sorts WHERE project_id IS ?1", [project])?;
+    if let Some((_, name)) = SORT_NAMES.iter().find(|(saved, _)| *saved == sort) {
+        transaction.execute(
+            "INSERT INTO sorts(project_id,sort) VALUES (?1,?2)",
+            params![project, name],
+        )?;
+    }
+    transaction.commit()?;
     Ok(())
 }
 
@@ -548,6 +593,7 @@ pub fn save_project(db: &Connection, id: Option<i64>, name: &str) -> Result<()> 
 pub fn nuke(db: &Connection) -> Result<()> {
     let transaction = db.unchecked_transaction()?;
     transaction.execute("DELETE FROM tasks", [])?;
+    transaction.execute("DELETE FROM sorts", [])?;
     transaction.execute("DELETE FROM projects", [])?;
     transaction.commit()?;
     Ok(())

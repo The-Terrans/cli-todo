@@ -515,6 +515,51 @@ fn lists_put_completed_tasks_last_newest_first_and_sort_pending_by_creation() ->
 }
 
 #[test]
+fn sorts_are_saved_per_list_survive_reopening_and_go_with_their_project() -> Result<()> {
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let path = env::temp_dir().join(format!("cli-todo-sort-{stamp}.sqlite3"));
+    let db = open(&path)?;
+    for name in ["Work", "Home"] {
+        save_project(&db, None, name)?;
+    }
+    let (work, home) = (1, 2);
+    save_sort(&db, Some(work), Sort::CreatedDesc)?;
+    save_sort(&db, None, Sort::CreatedAsc)?;
+    assert_eq!(
+        load_sort(&db, Some(home))?,
+        Sort::Manual,
+        "other projects keep Manual"
+    );
+    drop(db);
+    let db = open(&path)?;
+    assert_eq!(load_sort(&db, Some(work))?, Sort::CreatedDesc);
+    assert_eq!(
+        load_sort(&db, None)?,
+        Sort::CreatedAsc,
+        "Inbox has its own sort"
+    );
+    save_sort(&db, Some(work), Sort::CreatedAsc)?;
+    assert_eq!(
+        load_sort(&db, Some(work))?,
+        Sort::CreatedAsc,
+        "saving replaces"
+    );
+    save_sort(&db, None, Sort::Manual)?;
+    assert_eq!(load_sort(&db, None)?, Sort::Manual);
+    delete_project(&db, work)?;
+    let rows: i64 = db.query_row("SELECT COUNT(*) FROM sorts", [], |row| row.get(0))?;
+    assert_eq!(rows, 0, "deleting a project drops its sort");
+    save_sort(&db, None, Sort::CreatedDesc)?;
+    nuke(&db)?;
+    assert_eq!(load_sort(&db, None)?, Sort::Manual, "nuke resets sorts");
+    drop(db);
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn blank_titles_cannot_be_saved() -> Result<()> {
     let db = open(Path::new(":memory:"))?;
     assert!(save_task(&db, None, " \n\t ").is_err());

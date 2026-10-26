@@ -100,15 +100,17 @@ impl App {
     }
 
     fn refresh_tasks(&mut self) -> Result<()> {
-        self.tasks = if self.projects_focused && self.current_project.is_none() {
-            vec![]
+        (self.sort, self.tasks) = if self.projects_focused && self.current_project.is_none() {
+            (Sort::Manual, vec![])
         } else {
-            db::list_tasks_in(
+            let sort = db::load_sort(&self.db, self.current_project)?;
+            let tasks = db::list_tasks_in(
                 &self.db,
                 FILTERS[self.selected_filter].1,
                 self.current_project,
-                self.sort,
-            )?
+                sort,
+            )?;
+            (sort, tasks)
         };
         self.selected_task = self.selected_task.min(self.tasks.len().saturating_sub(1));
         self.refresh_task_view()
@@ -461,6 +463,9 @@ impl App {
             }
             KeyCode::Esc => self.navigation_focused = true,
             _ if self.commits_focused => self.handle_commit_key(key),
+            // Projects without a project selected have no list to filter or sort.
+            KeyCode::Char('f' | 'r') if self.projects_focused && self.current_project.is_none() => {
+            }
             // Inbox keeps its filters in the left panel; projects use the popup.
             KeyCode::Char('f') if self.current_project.is_none() => {
                 self.message = "Choose Inbox filters in the left panel".into();
@@ -947,8 +952,9 @@ impl App {
             KeyCode::Up => *selected = selected.saturating_sub(1),
             KeyCode::Down => *selected = (*selected + 1).min(SORTS.len() - 1),
             KeyCode::Enter => {
-                self.sort = SORTS[*selected].1;
+                let sort = SORTS[*selected].1;
                 self.mode = Mode::Browse;
+                db::save_sort(&self.db, self.current_project, sort)?;
                 self.selected_task = 0;
                 self.refresh_tasks()?;
             }
