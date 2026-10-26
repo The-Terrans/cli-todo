@@ -7,9 +7,9 @@ use editor_render::{set_cursor, set_input_cursor, task_field_text, wrapped_curso
 mod editor_render_tests;
 
 use crate::{
-    constants::{FILTERS, KEYBINDINGS},
+    constants::{FILTERS, KEYBINDINGS, SORTS},
     dates::is_overdue,
-    types::{App, Mode, Task, TaskDraft, TaskField, TaskPane, TaskView},
+    types::{App, Mode, Sort, Task, TaskDraft, TaskField, TaskPane, TaskView},
 };
 use chrono::{Local, NaiveDate};
 use ratatui::{
@@ -411,7 +411,13 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
     });
     let mut state = ListState::default()
         .with_selected((active && !app.tasks.is_empty()).then_some(app.selected_task));
-    let title = project_title(app, "─[0]─Tasks", app.current_project);
+    let mut title = project_title(app, "─[0]─Tasks", app.current_project);
+    title.push_str(&format!(" · {}", FILTERS[app.selected_filter].0));
+    if app.sort != Sort::Manual {
+        if let Some((label, _)) = SORTS.iter().find(|(_, sort)| *sort == app.sort) {
+            title.push_str(&format!(" · {label}"));
+        }
+    }
     frame.render_stateful_widget(
         List::new(items)
             .highlight_spacing(HighlightSpacing::Always)
@@ -463,6 +469,24 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
         Mode::Help { .. } => return draw_keybindings(frame, app),
         Mode::Palette { .. } => return draw_palette(frame, app),
         Mode::Move { .. } => return draw_move_dialog(frame, app),
+        Mode::Filter { selected } => {
+            return draw_picker(
+                frame,
+                " Filter tasks: Enter selects, Esc cancels ",
+                FILTERS.iter().map(|(label, _)| *label),
+                *selected,
+                FILTERS.len() as u16 + 2,
+            )
+        }
+        Mode::Sort { selected } => {
+            return draw_picker(
+                frame,
+                " Sort pending tasks: Enter selects, Esc cancels ",
+                SORTS.iter().map(|(label, _)| *label),
+                *selected,
+                SORTS.len() as u16 + 2,
+            )
+        }
         Mode::RemoteEdit(text) => {
             return draw_input_dialog(
                 frame,
@@ -952,16 +976,33 @@ fn draw_move_dialog(frame: &mut Frame, app: &App) {
     let Mode::Move { selected, .. } = &app.mode else {
         return;
     };
-    let area = dialog_area(frame.area(), 10);
-    let block = panel(" Move task: Enter selects, Esc cancels ", true);
+    let destinations = std::iter::once("No project")
+        .chain(app.projects.iter().map(|project| project.name.as_str()));
+    draw_picker(
+        frame,
+        " Move task: Enter selects, Esc cancels ",
+        destinations,
+        *selected,
+        10,
+    );
+}
+
+/// Draws a popup list of choices with `selected` highlighted.
+fn draw_picker<'a>(
+    frame: &mut Frame,
+    title: &str,
+    items: impl IntoIterator<Item = &'a str>,
+    selected: usize,
+    height: u16,
+) {
+    let area = dialog_area(frame.area(), height);
+    let block = panel(title, true);
     let inner = block.inner(area);
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
-    let destinations = std::iter::once("No project")
-        .chain(app.projects.iter().map(|project| project.name.as_str()));
-    let mut state = ListState::default().with_selected(Some(*selected));
+    let mut state = ListState::default().with_selected(Some(selected));
     frame.render_stateful_widget(
-        List::new(destinations)
+        List::new(items)
             .highlight_style(selection_style())
             .highlight_symbol("> "),
         inner,

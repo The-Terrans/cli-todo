@@ -1,9 +1,9 @@
 use crate::{
-    constants::{ACTIONS, ALL_FILTER, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH},
+    constants::{ACTIONS, ALL_FILTER, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH, SORTS},
     dates::{date_phrases, parse_due_date, remove_date_phrase},
     db,
     types::{
-        Action, App, AutoDate, Filter, History, Mode, SyncResult, Task, TaskDraft, TaskField,
+        Action, App, AutoDate, Filter, History, Mode, Sort, SyncResult, Task, TaskDraft, TaskField,
         TaskPane, TaskView,
     },
     Result,
@@ -40,6 +40,7 @@ impl App {
             input_cursor: crate::editor::TextCursor::default(),
             navigation_focused: true,
             selected_filter: 0,
+            sort: Sort::default(),
             inbox_state: None,
             mode: Mode::Browse,
             message: String::new(),
@@ -106,6 +107,7 @@ impl App {
                 &self.db,
                 FILTERS[self.selected_filter].1,
                 self.current_project,
+                self.sort,
             )?
         };
         self.selected_task = self.selected_task.min(self.tasks.len().saturating_sub(1));
@@ -353,6 +355,10 @@ impl App {
         let (tasks, selected) = match &self.task_view {
             Some(view) if view.focus == TaskPane::Subtasks => (&view.children, view.selected_child),
             Some(_) => return Ok(()),
+            None if self.sort != Sort::Manual => {
+                self.message = "Press r and choose Manual order to reorder tasks".into();
+                return Ok(());
+            }
             None => (&self.tasks, self.selected_task),
         };
         let Some(target) = (if down {
@@ -365,6 +371,10 @@ impl App {
         let (Some(task), Some(neighbour)) = (tasks.get(selected), tasks.get(target)) else {
             return Ok(());
         };
+        if self.task_view.is_none() && (task.done || neighbour.done) {
+            self.message = "Completed tasks stay ordered by completion date".into();
+            return Ok(());
+        }
         db::swap_tasks(&self.db, task.id, neighbour.id)?;
         match &mut self.task_view {
             Some(view) => view.selected_child = target,
@@ -419,6 +429,8 @@ impl App {
             }
             Mode::RemoteEdit(_) => self.handle_remote_edit_key(key),
             Mode::Move { .. } => self.handle_move_key(key)?,
+            Mode::Filter { .. } => self.handle_filter_key(key)?,
+            Mode::Sort { .. } => self.handle_sort_key(key)?,
         }
         Ok(false)
     }
@@ -443,6 +455,23 @@ impl App {
             }
             KeyCode::Esc => self.navigation_focused = true,
             _ if self.commits_focused => self.handle_commit_key(key),
+            // Inbox keeps its filters in the left panel; projects use the popup.
+            KeyCode::Char('f') if self.current_project.is_none() => {
+                self.message = "Choose Inbox filters in the left panel".into();
+            }
+            KeyCode::Char('f') => {
+                self.mode = Mode::Filter {
+                    selected: self.selected_filter,
+                }
+            }
+            KeyCode::Char('r') => {
+                self.mode = Mode::Sort {
+                    selected: SORTS
+                        .iter()
+                        .position(|(_, sort)| *sort == self.sort)
+                        .unwrap_or(0),
+                }
+            }
             _ if self.navigation_focused && self.projects_focused => {
                 self.handle_project_key(key)?
             }
@@ -883,6 +912,43 @@ impl App {
         };
         self.current_project = None;
         self.select_filter(filter)
+    }
+
+    fn handle_filter_key(&mut self, key: KeyCode) -> Result<()> {
+        let Mode::Filter { selected } = &mut self.mode else {
+            return Ok(());
+        };
+        match key {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Up => *selected = selected.saturating_sub(1),
+            KeyCode::Down => *selected = (*selected + 1).min(FILTERS.len() - 1),
+            KeyCode::Enter => {
+                let filter = *selected;
+                self.mode = Mode::Browse;
+                self.execute_action(Action::ShowFilter(filter))?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_sort_key(&mut self, key: KeyCode) -> Result<()> {
+        let Mode::Sort { selected } = &mut self.mode else {
+            return Ok(());
+        };
+        match key {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Up => *selected = selected.saturating_sub(1),
+            KeyCode::Down => *selected = (*selected + 1).min(SORTS.len() - 1),
+            KeyCode::Enter => {
+                self.sort = SORTS[*selected].1;
+                self.mode = Mode::Browse;
+                self.selected_task = 0;
+                self.refresh_tasks()?;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     fn select_filter(&mut self, filter: usize) -> Result<()> {

@@ -1,4 +1,4 @@
-use crate::types::{Action, Filter};
+use crate::types::{Action, Filter, Sort};
 
 pub const MAX_SUBTASK_DEPTH: usize = 64;
 
@@ -11,6 +11,12 @@ pub const FILTERS: [(&str, Filter); 4] = [
 
 /// Index of the All filter, used when a task must be visible regardless of status or date.
 pub const ALL_FILTER: usize = 1;
+
+pub const SORTS: [(&str, Sort); 3] = [
+    ("Manual order", Sort::Manual),
+    ("Created date ↑ (oldest first)", Sort::CreatedAsc),
+    ("Created date ↓ (newest first)", Sort::CreatedDesc),
+];
 
 pub const KEYBINDINGS: &[&str] = &[
     "BROWSING",
@@ -37,7 +43,9 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Space         Complete/reopen task (Tasks only)",
     "  d             Delete task/project with confirmation",
     "  m             Move task to a project or No project",
-    "  Alt+J / Alt+K Move selected task down/up in the list",
+    "  f             Filter a project's tasks: Today/All/Pending/Completed",
+    "  r             Sort pending tasks: Manual / Created date ↑ / ↓",
+    "  Alt+J / Alt+K Move selected pending task down/up (Manual order)",
     "  Shift+D       Nuke all data, local commits and remote settings",
     "",
     "COMMITS (LEFT PANEL)",
@@ -57,7 +65,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Ctrl+S        Save from Description/Due date",
     "  Ctrl+G        Task popup: edit whole draft in VISUAL/EDITOR",
     "  Due date      Optional YYYY-MM-DD; blank clears the deadline",
-    "  Up / Down     Choose search result or move destination",
+    "  Up / Down     Choose search result, destination, filter or sort",
     "  Esc           Cancel dialog/search/move",
     "  Ctrl+K        Close palette; does not interrupt other dialogs",
     "  Empty origin  Save empty input to remove remote settings",

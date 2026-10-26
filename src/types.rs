@@ -15,6 +15,8 @@ pub struct Task {
     pub parent_id: Option<i64>,
     pub subtask_count: usize,
     pub due_date: Option<NaiveDate>,
+    /// UTC completion time; `None` for pending tasks and tasks completed before it was recorded.
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -29,6 +31,17 @@ pub enum Filter {
     All,
     Pending,
     Completed,
+}
+
+/// Order of pending tasks in the main list; completed tasks always follow, newest first.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Sort {
+    #[default]
+    Manual,
+    /// Oldest created first.
+    CreatedAsc,
+    /// Newest created first.
+    CreatedDesc,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +126,12 @@ pub enum Mode {
         task: i64,
         selected: usize,
     },
+    Filter {
+        selected: usize,
+    },
+    Sort {
+        selected: usize,
+    },
 }
 
 pub struct Commit {
@@ -179,6 +198,7 @@ pub struct App {
     pub(crate) input_cursor: crate::editor::TextCursor,
     pub navigation_focused: bool,
     pub selected_filter: usize,
+    pub sort: Sort,
     /// Inbox filter and selected row, saved while a project list is shown.
     pub(crate) inbox_state: Option<(usize, usize)>,
     pub mode: Mode,

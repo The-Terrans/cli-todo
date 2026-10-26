@@ -1,3 +1,4 @@
+use super::tests::keys;
 use super::*;
 use crate::editor::TextCursor;
 use std::path::Path;
@@ -28,9 +29,10 @@ fn e_edits_tasks_and_subtasks_while_remote_r_and_project_e_stay_unchanged() -> R
     for step in 0..4 {
         app.handle_key(KeyCode::Char('r'))?;
         assert!(
-            matches!(app.mode, Mode::Browse),
-            "r must not remain an edit alias"
+            matches!(app.mode, Mode::Sort { .. }),
+            "r sorts tasks instead of editing them"
         );
+        app.handle_key(KeyCode::Esc)?;
         let title = if step == 3 { "child" } else { "parent" };
         app.handle_key(KeyCode::Char('e'))?;
         assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.title == title));
@@ -58,13 +60,6 @@ fn e_edits_tasks_and_subtasks_while_remote_r_and_project_e_stay_unchanged() -> R
     app.handle_key(KeyCode::Char('2'))?;
     app.handle_key(KeyCode::Char('e'))?;
     assert!(matches!(&app.mode, Mode::ProjectEdit(Some(_), name) if name == "Work"));
-    Ok(())
-}
-
-fn keys(app: &mut App, keys: &[KeyCode]) -> Result<()> {
-    for key in keys {
-        app.handle_key(*key)?;
-    }
     Ok(())
 }
 
