@@ -1789,6 +1789,14 @@ fn sort_popup_orders_pending_tasks_and_limits_reordering_to_manual_order() -> Re
     assert_eq!(app.sort, Sort::Manual);
     alt(&mut app, 'j')?;
     assert_eq!(titles(&app), ["first", "second", "third"]);
+    let alt_arrow =
+        |app: &mut App, key| app.handle_key_event(KeyEvent::new(key, KeyModifiers::ALT));
+    alt_arrow(&mut app, KeyCode::Up)?;
+    assert_eq!(titles(&app), ["second", "first", "third"]);
+    assert_eq!(app.selected_task, 0);
+    alt_arrow(&mut app, KeyCode::Down)?;
+    assert_eq!(titles(&app), ["first", "second", "third"]);
+    assert_eq!(app.selected_task, 1);
     Ok(())
 }
 

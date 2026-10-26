@@ -332,10 +332,16 @@ impl App {
             }
             return Ok(false);
         }
-        if modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Char('j' | 'k')) {
+        if modifiers == KeyModifiers::ALT
+            && matches!(
+                key.code,
+                KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up
+            )
+        {
             let changes = self.db.total_changes();
             self.message.clear();
-            let result = self.reorder_selected(key.code == KeyCode::Char('j'));
+            let result =
+                self.reorder_selected(matches!(key.code, KeyCode::Char('j') | KeyCode::Down));
             if self.db.total_changes() != changes {
                 self.update_commit_status();
             }
