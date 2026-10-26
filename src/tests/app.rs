@@ -119,7 +119,11 @@ fn task_views_drill_down_add_children_edit_and_complete_without_popups() -> Resu
     assert_eq!(app.new_task_parent, None);
     assert_eq!(app.task_view.as_ref().unwrap().children.len(), 2);
     app.handle_key(KeyCode::Char('r'))?;
-    assert!(matches!(app.mode, Mode::Browse), "r no longer edits tasks");
+    assert!(
+        matches!(app.mode, Mode::Sort { .. }),
+        "r sorts instead of editing"
+    );
+    app.handle_key(KeyCode::Esc)?;
     app.handle_key(KeyCode::Char('e'))?;
     assert!(matches!(app.mode, Mode::Edit(Some(id), _) if id == parent));
     app.handle_key(KeyCode::Char('!'))?;
@@ -639,6 +643,13 @@ fn palette_opens_subtasks_for_rewording_and_nesting_is_bounded() -> Result<()> {
 
 fn app() -> Result<App> {
     App::new_showing_all(db::open(Path::new(":memory:"))?)
+}
+
+pub(super) fn keys(app: &mut App, keys: &[KeyCode]) -> Result<()> {
+    for key in keys {
+        app.handle_key(*key)?;
+    }
+    Ok(())
 }
 
 fn search_actions(app: &mut App, query: &str) -> Result<()> {
@@ -1662,6 +1673,178 @@ fn alt_j_and_k_reorder_tasks_and_focused_subtasks() -> Result<()> {
             .collect::<Vec<_>>(),
         ["child b", "child a"]
     );
+    Ok(())
+}
+
+#[test]
+fn filter_popup_only_filters_projects() -> Result<()> {
+    let mut app = app()?;
+    db::save_project(&app.db, None, "Work")?;
+    let work = app.db.last_insert_rowid();
+    db::create_task(&app.db, "pending work", Some(work))?;
+    db::create_task(&app.db, "done work", Some(work))?;
+    db::toggle_task(&app.db, app.db.last_insert_rowid())?;
+    app.refresh_projects()?;
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    app.handle_key(KeyCode::Char('f'))?;
+    assert!(
+        matches!(app.mode, Mode::Browse),
+        "Inbox has no filter popup"
+    );
+    assert_eq!(app.message, "Choose Inbox filters in the left panel");
+    app.handle_key(KeyCode::Char('2'))?;
+    app.handle_key(KeyCode::Char('f'))?;
+    assert!(matches!(
+        app.mode,
+        Mode::Filter {
+            selected: ALL_FILTER
+        }
+    ));
+    keys(&mut app, &[KeyCode::Up; 3])?;
+    assert!(matches!(app.mode, Mode::Filter { selected: 0 }));
+    keys(&mut app, &[KeyCode::Down; 5])?;
+    assert!(matches!(app.mode, Mode::Filter { selected: 3 }));
+    app.handle_key(KeyCode::Esc)?;
+    assert_eq!(app.selected_filter, ALL_FILTER, "Esc keeps the filter");
+    assert_eq!(titles(&app), ["pending work", "done work"]);
+    keys(
+        &mut app,
+        &[KeyCode::Char('f'), KeyCode::Down, KeyCode::Enter],
+    )?;
+    assert_eq!(titles(&app), ["pending work"]);
+    assert!(
+        !app.navigation_focused,
+        "choosing a filter focuses its tasks"
+    );
+    keys(
+        &mut app,
+        &[KeyCode::Char('f'), KeyCode::Down, KeyCode::Enter],
+    )?;
+    assert_eq!(titles(&app), ["done work"]);
+    assert_eq!(app.current_project, Some(work));
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!(
+        app.selected_filter, ALL_FILTER,
+        "Inbox keeps its own filter"
+    );
+    Ok(())
+}
+
+#[test]
+fn sort_popup_orders_pending_tasks_and_limits_reordering_to_manual_order() -> Result<()> {
+    let mut app = app()?;
+    for title in ["first", "second", "third"] {
+        db::save_task(&app.db, None, title)?;
+    }
+    app.refresh_tasks()?;
+    let first = app.tasks[0].id;
+    db::swap_tasks(&app.db, first, app.tasks[1].id)?;
+    db::toggle_task(&app.db, app.tasks[2].id)?;
+    app.refresh_tasks()?;
+    app.handle_key(KeyCode::Char('0'))?;
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    let alt = |app: &mut App, character| {
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(character), KeyModifiers::ALT))
+    };
+    assert_eq!(titles(&app), ["second", "first", "third"]);
+    keys(&mut app, &[KeyCode::Char('r'), KeyCode::Down, KeyCode::Esc])?;
+    assert_eq!(app.sort, Sort::Manual, "Esc keeps the order");
+    app.handle_key(KeyCode::Down)?;
+    alt(&mut app, 'j')?;
+    assert_eq!(
+        app.message,
+        "Completed tasks stay ordered by completion date"
+    );
+    assert_eq!(titles(&app), ["second", "first", "third"]);
+    keys(
+        &mut app,
+        &[KeyCode::Char('r'), KeyCode::Down, KeyCode::Enter],
+    )?;
+    assert_eq!(app.sort, Sort::CreatedAsc);
+    assert_eq!(titles(&app), ["first", "second", "third"]);
+    assert_eq!(app.selected_task, 0);
+    keys(
+        &mut app,
+        &[
+            KeyCode::Char('r'),
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Enter,
+        ],
+    )?;
+    assert_eq!(app.sort, Sort::CreatedDesc);
+    assert_eq!(titles(&app), ["second", "first", "third"]);
+    alt(&mut app, 'j')?;
+    assert_eq!(
+        app.message,
+        "Press r and choose Manual order to reorder tasks"
+    );
+    assert_eq!(titles(&app), ["second", "first", "third"]);
+    keys(
+        &mut app,
+        &[KeyCode::Char('r'), KeyCode::Up, KeyCode::Up, KeyCode::Enter],
+    )?;
+    assert_eq!(app.sort, Sort::Manual);
+    alt(&mut app, 'j')?;
+    assert_eq!(titles(&app), ["first", "second", "third"]);
+    let alt_arrow =
+        |app: &mut App, key| app.handle_key_event(KeyEvent::new(key, KeyModifiers::ALT));
+    alt_arrow(&mut app, KeyCode::Up)?;
+    assert_eq!(titles(&app), ["second", "first", "third"]);
+    assert_eq!(app.selected_task, 0);
+    alt_arrow(&mut app, KeyCode::Down)?;
+    assert_eq!(titles(&app), ["first", "second", "third"]);
+    assert_eq!(app.selected_task, 1);
+    Ok(())
+}
+
+#[test]
+fn each_list_keeps_its_own_sort() -> Result<()> {
+    let mut app = app()?;
+    for name in ["Work", "Home"] {
+        db::save_project(&app.db, None, name)?;
+    }
+    for (title, project) in [("work a", 1), ("work b", 1), ("home a", 2), ("home b", 2)] {
+        db::create_task(&app.db, title, Some(project))?;
+    }
+    app.refresh_projects()?;
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    keys(&mut app, &[KeyCode::Char('2'), KeyCode::Char('r')])?;
+    keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter])?;
+    assert_eq!(titles(&app), ["work b", "work a"]);
+    keys(&mut app, &[KeyCode::Char('2'), KeyCode::Down])?;
+    assert_eq!(
+        app.sort,
+        Sort::Manual,
+        "Home is not sorted by Work's choice"
+    );
+    assert_eq!(titles(&app), ["home a", "home b"]);
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!(
+        app.sort,
+        Sort::Manual,
+        "Inbox is not sorted by Work's choice"
+    );
+    keys(
+        &mut app,
+        &[KeyCode::Char('r'), KeyCode::Down, KeyCode::Enter],
+    )?;
+    assert_eq!(app.sort, Sort::CreatedAsc);
+    app.handle_key(KeyCode::Up)?;
+    assert_eq!(app.selected_filter, 0);
+    assert_eq!(
+        app.sort,
+        Sort::Manual,
+        "Today is not sorted by All's choice"
+    );
+    app.handle_key(KeyCode::Down)?;
+    assert_eq!(app.sort, Sort::CreatedAsc, "All keeps its sort");
+    keys(&mut app, &[KeyCode::Char('2'), KeyCode::Up])?;
+    assert_eq!(app.sort, Sort::CreatedDesc, "Work keeps its sort");
+    assert_eq!(titles(&app), ["work b", "work a"]);
     Ok(())
 }
 

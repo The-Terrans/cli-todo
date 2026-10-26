@@ -1,15 +1,19 @@
 use crate::{
     constants::MAX_SUBTASK_DEPTH,
     dates::parse_due_date,
-    types::{Filter, Project, SubtaskDraft, Task, TaskDraft},
+    types::{Filter, Project, Sort, SubtaskDraft, Task, TaskDraft},
     Result,
 };
 use chrono::{Local, NaiveDate};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::{
+    cmp::Ordering,
     collections::{HashMap, HashSet},
     path::Path,
 };
+
+/// Sets `done` to parameter ?2, stamping newly completed tasks and clearing reopened ones.
+const SET_DONE: &str = "done=?2,completed_at=CASE WHEN NOT ?2 THEN NULL WHEN done THEN completed_at ELSE strftime('%Y-%m-%d %H:%M:%f','now') END";
 
 pub fn open(path: &Path) -> Result<Connection> {
     let db = Connection::open(path)?;
@@ -37,6 +41,8 @@ pub fn open(path: &Path) -> Result<Connection> {
     migrate_subtasks(&db)?;
     migrate_due_dates(&db)?;
     migrate_positions(&db)?;
+    migrate_completed_at(&db)?;
+    migrate_sorts(&db)?;
     validate_hierarchy(&db)?;
     Ok(db)
 }
@@ -77,6 +83,81 @@ pub fn migrate_positions(db: &Connection) -> Result<()> {
     }
     // Existing tasks keep their creation order.
     db.execute_batch("UPDATE tasks SET position=id WHERE position IS NULL;")?;
+    Ok(())
+}
+
+/// Tasks completed before this column existed keep no completion time.
+pub fn migrate_completed_at(db: &Connection) -> Result<()> {
+    if !has_column(db, "completed_at")? {
+        db.execute_batch("ALTER TABLE tasks ADD COLUMN completed_at TEXT;")?;
+    }
+    Ok(())
+}
+
+/// Saved list sorts: one row per project (NULL filter) and one per Inbox filter (NULL
+/// project). Manual order has no row.
+pub fn migrate_sorts(db: &Connection) -> Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS list_sorts (
+            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+            filter TEXT,
+            sort TEXT NOT NULL,
+            UNIQUE(project_id, filter)
+        );",
+    )?;
+    Ok(())
+}
+
+/// A project shares one sort across its filters; each Inbox filter has its own.
+fn sort_list(project: Option<i64>, filter: Filter) -> (Option<i64>, Option<&'static str>) {
+    if project.is_some() {
+        return (project, None);
+    }
+    let name = match filter {
+        Filter::Today => "today",
+        Filter::All => "all",
+        Filter::Pending => "pending",
+        Filter::Completed => "completed",
+    };
+    (None, Some(name))
+}
+
+const SORT_NAMES: [(Sort, &str); 2] = [
+    (Sort::CreatedAsc, "created_asc"),
+    (Sort::CreatedDesc, "created_desc"),
+];
+
+/// Returns the saved sort for `project`, or Inbox's `filter` when `None`; unknown names fall
+/// back to Manual.
+pub fn load_sort(db: &Connection, project: Option<i64>, filter: Filter) -> Result<Sort> {
+    let (project, filter) = sort_list(project, filter);
+    let name: Option<String> = db
+        .query_row(
+            "SELECT sort FROM list_sorts WHERE project_id IS ?1 AND filter IS ?2",
+            params![project, filter],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(SORT_NAMES
+        .iter()
+        .find(|(_, saved)| Some(*saved) == name.as_deref())
+        .map_or(Sort::Manual, |(sort, _)| *sort))
+}
+
+pub fn save_sort(db: &Connection, project: Option<i64>, filter: Filter, sort: Sort) -> Result<()> {
+    let (project, filter) = sort_list(project, filter);
+    let transaction = db.unchecked_transaction()?;
+    transaction.execute(
+        "DELETE FROM list_sorts WHERE project_id IS ?1 AND filter IS ?2",
+        params![project, filter],
+    )?;
+    if let Some((_, name)) = SORT_NAMES.iter().find(|(saved, _)| *saved == sort) {
+        transaction.execute(
+            "INSERT INTO list_sorts(project_id,filter,sort) VALUES (?1,?2,?3)",
+            params![project, filter, name],
+        )?;
+    }
+    transaction.commit()?;
     Ok(())
 }
 
@@ -286,7 +367,7 @@ fn save_children(
         let id = child.id.unwrap_or_else(|| db.last_insert_rowid());
         save_due_date(db, id, &child.draft.due_date)?;
         db.execute(
-            "UPDATE tasks SET parent_id=?1,done=?2 WHERE id=?3",
+            &format!("UPDATE tasks SET parent_id=?1,{SET_DONE} WHERE id=?3"),
             params![parent, child.done, id],
         )?;
         save_children(db, id, &child.draft.subtasks, project)?;
@@ -378,8 +459,13 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
     } else {
         "id"
     };
+    let completed_at = if has_column(db, "completed_at")? {
+        "completed_at"
+    } else {
+        "NULL"
+    };
     let mut statement = db.prepare(&format!(
-        "SELECT id,title,done,project_id,{description},{parent},{subtask_count},{due_date} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY {position},id"
+        "SELECT id,title,done,project_id,{description},{parent},{subtask_count},{due_date},{completed_at} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY {position},id"
     ))?;
     let rows = statement.query_map([done], |row| {
         let date: Option<String> = row.get(7)?;
@@ -402,6 +488,7 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
             parent_id: row.get(5)?,
             subtask_count: row.get(6)?,
             due_date,
+            completed_at: row.get(8)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -423,17 +510,25 @@ pub fn toggle_task(db: &Connection, id: i64) -> Result<()> {
 
 fn set_task_done(db: &Connection, id: i64, done: bool) -> Result<()> {
     db.execute(
-        "WITH RECURSIVE descendants(id) AS (
+        &format!(
+            "WITH RECURSIVE descendants(id) AS (
             SELECT id FROM tasks WHERE id=?1
             UNION SELECT tasks.id FROM tasks JOIN descendants ON tasks.parent_id=descendants.id
-        ) UPDATE tasks SET done=?2 WHERE id=?1 OR (?2 AND id IN descendants)",
+        ) UPDATE tasks SET {SET_DONE} WHERE id=?1 OR (?2 AND id IN descendants)"
+        ),
         params![id, done],
     )?;
     Ok(())
 }
 
 /// Lists top-level tasks in `project`, or all top-level tasks (any project or none) when `None`.
-pub fn list_tasks_in(db: &Connection, filter: Filter, project: Option<i64>) -> Result<Vec<Task>> {
+/// Pending tasks come first in `sort` order, then completed tasks, most recently completed first.
+pub fn list_tasks_in(
+    db: &Connection,
+    filter: Filter,
+    project: Option<i64>,
+    sort: Sort,
+) -> Result<Vec<Task>> {
     let due = if filter == Filter::Today {
         Some(roots_due_by(
             &list_tasks(db, Filter::All)?,
@@ -442,14 +537,25 @@ pub fn list_tasks_in(db: &Connection, filter: Filter, project: Option<i64>) -> R
     } else {
         None
     };
-    Ok(list_tasks(db, filter)?
+    let mut tasks: Vec<_> = list_tasks(db, filter)?
         .into_iter()
         .filter(|task| {
             task.parent_id.is_none()
                 && project.is_none_or(|id| task.project_id == Some(id))
                 && due.as_ref().is_none_or(|due| due.contains(&task.id))
         })
-        .collect())
+        .collect();
+    // Stable sort: ties keep the manual order. Ids grow with creation, so they order by creation.
+    tasks.sort_by(|a, b| {
+        a.done.cmp(&b.done).then_with(|| match (a.done, sort) {
+            // `None` sorts before `Some`, so reversing puts unrecorded completions last.
+            (true, _) => b.completed_at.cmp(&a.completed_at),
+            (false, Sort::Manual) => Ordering::Equal,
+            (false, Sort::CreatedAsc) => a.id.cmp(&b.id),
+            (false, Sort::CreatedDesc) => b.id.cmp(&a.id),
+        })
+    });
+    Ok(tasks)
 }
 
 /// Top-level ids whose task or any descendant is unfinished and due on or before `today`.
@@ -510,6 +616,7 @@ pub fn save_project(db: &Connection, id: Option<i64>, name: &str) -> Result<()> 
 pub fn nuke(db: &Connection) -> Result<()> {
     let transaction = db.unchecked_transaction()?;
     transaction.execute("DELETE FROM tasks", [])?;
+    transaction.execute("DELETE FROM list_sorts", [])?;
     transaction.execute("DELETE FROM projects", [])?;
     transaction.commit()?;
     Ok(())

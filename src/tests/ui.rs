@@ -970,6 +970,22 @@ fn inbox_lists_every_project_with_tags_and_filters() -> Result<()> {
         text.contains("[ ] buy milk "),
         "unassigned tasks have no tag"
     );
+    assert!(text.contains("Tasks · All"), "title names the filter");
+    for key in [KeyCode::Char('r'), KeyCode::Down, KeyCode::Enter] {
+        press(&mut app, key)?;
+    }
+    assert!(
+        screen(&app)?.contains("Tasks · All · Created date ↑ (oldest first)"),
+        "title names a non-manual sort"
+    );
+    for key in [
+        KeyCode::Char('r'),
+        KeyCode::Up,
+        KeyCode::Enter,
+        KeyCode::Char('1'),
+    ] {
+        press(&mut app, key)?;
+    }
     press(&mut app, KeyCode::Down)?;
     assert_eq!(titles(&app), ["write report", "buy milk"]);
     press(&mut app, KeyCode::Down)?;
