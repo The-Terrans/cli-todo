@@ -96,16 +96,7 @@ fn task_selection_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-/// Pads a selected task so its border box does not cover the text.
-fn task_item(mut lines: Vec<Line<'static>>, selected: bool) -> ListItem<'static> {
-    if selected {
-        lines.insert(0, Line::default());
-        lines.push(Line::default());
-    }
-    ListItem::new(lines)
-}
-
-/// Renders tasks inside `block` and draws a border around the selected one.
+/// Renders tasks inside `block` and draws side borders around the selected one.
 fn draw_task_list(
     frame: &mut Frame,
     area: Rect,
@@ -117,7 +108,7 @@ fn draw_task_list(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let mut state = ListState::default().with_selected(selected);
-    // The blank gutter leaves room for the box's left edge.
+    // The blank gutter leaves room for the left border and its padding.
     frame.render_stateful_widget(
         List::new(items)
             .highlight_spacing(HighlightSpacing::Always)
@@ -132,12 +123,20 @@ fn draw_task_list(
     let y = inner.y.saturating_add(above.min(u16::MAX as usize) as u16);
     let height =
         (heights[selected].min(u16::MAX as usize) as u16).min(inner.bottom().saturating_sub(y));
+    let area = Rect::new(inner.x, y, inner.width, height);
     frame.render_widget(
-        Block::bordered()
-            .border_type(BorderType::Rounded)
+        Block::new()
+            .borders(Borders::LEFT | Borders::RIGHT)
             .border_style(Style::default().fg(Color::LightYellow)),
-        Rect::new(inner.x, y, inner.width, height),
+        area,
     );
+    // Keep one blank column before the right border, even for long titles.
+    if area.width > 2 {
+        let buffer = frame.buffer_mut();
+        for row in area.rows() {
+            buffer[(area.right() - 2, row.y)].reset();
+        }
+    }
 }
 
 fn draw_navigation(frame: &mut Frame, area: Rect, app: &App) {
@@ -393,7 +392,7 @@ fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
                     style,
                     today,
                 );
-                task_item(vec![title], selected)
+                ListItem::new(title)
             })
             .collect();
         draw_task_list(
@@ -459,7 +458,7 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::DIM),
             ));
         }
-        task_item(lines, selected)
+        ListItem::new(lines)
     });
     let mut title = project_title(app, "─[0]─Tasks", app.current_project);
     title.push_str(&format!(" · {}", FILTERS[app.selected_filter].0));
