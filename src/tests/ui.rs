@@ -4,6 +4,18 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
 use std::path::Path;
 
+/// Counts yellow boxes drawn around a selected task inside a panel.
+fn selection_boxes(buffer: &ratatui::buffer::Buffer) -> usize {
+    buffer
+        .content
+        .chunks(buffer.area.width.into())
+        .flat_map(|row| row.windows(2))
+        .filter(|pair| {
+            pair[0].symbol() == "│" && pair[1].symbol() == "╭" && pair[1].fg == Color::LightYellow
+        })
+        .count()
+}
+
 #[test]
 fn live_date_keywords_are_highlighted_and_escape_removes_the_highlight() -> Result<()> {
     let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
@@ -178,13 +190,7 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
         0,
         "no editor popup"
     );
-    assert_eq!(
-        cells
-            .iter()
-            .filter(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
-            .count(),
-        0
-    );
+    assert_eq!(selection_boxes(terminal.backend().buffer()), 0);
     let corners: Vec<_> = cells
         .iter()
         .enumerate()
@@ -195,20 +201,17 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
     app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))?;
     terminal.draw(|frame| draw(frame, &app))?;
     let cells = &terminal.backend().buffer().content;
-    assert_eq!(
-        cells
-            .iter()
-            .filter(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
-            .count(),
-        1
-    );
+    assert_eq!(selection_boxes(terminal.backend().buffer()), 1);
     let corners: Vec<_> = cells
         .iter()
         .enumerate()
         .filter(|(index, cell)| index % 100 >= 25 && cell.symbol() == "╭")
         .map(|(_, cell)| cell.fg)
         .collect();
-    assert_eq!(corners, vec![Color::DarkGray, Color::LightYellow]);
+    assert_eq!(
+        corners,
+        vec![Color::DarkGray, Color::LightYellow, Color::LightYellow]
+    );
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))?;
     terminal.draw(|frame| draw(frame, &app))?;
     let text: String = terminal
@@ -232,8 +235,8 @@ fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
     assert_eq!(overdue.spans[0].content, "[ ] dated (2 subtasks)");
     assert_eq!(overdue.spans[1].content, " [due: 2026-08-14]");
     assert_eq!(overdue.spans[1].style.fg, Some(Color::LightRed));
-    let selected = task_title_line("dated", false, 0, due, selection_style(), today);
-    assert_eq!(selected.spans[1].style.fg, Some(Color::Red));
+    let selected = task_title_line("dated", false, 0, due, task_selection_style(), today);
+    assert_eq!(selected.spans[1].style.fg, Some(Color::LightRed));
     let completed = task_title_line("dated", true, 0, due, Style::default(), today);
     assert_eq!(completed.spans[1].style.fg, Some(Color::DarkGray));
     let due_today = task_title_line("dated", false, 0, Some(today), Style::default(), today);
@@ -432,16 +435,20 @@ fn task_descriptions_use_a_dim_preview_without_extra_empty_rows() -> Result<()> 
         }
         terminal.draw(|frame| draw(frame, &app))?;
         let buffer = terminal.backend().buffer();
-        let preview = &buffer[(32, 2)];
+        // The selection box adds a row above and below the selected task.
+        let pad = u16::from(focused);
+        let preview = &buffer[(32, 2 + pad)];
         assert_eq!(preview.symbol(), "f");
         assert_eq!(preview.fg, Color::DarkGray);
+        assert_eq!(preview.bg, Color::Reset);
         assert!(preview.modifier.contains(Modifier::DIM));
         assert!(!preview.modifier.contains(Modifier::BOLD));
-        assert_eq!(buffer[(32, 1)].symbol(), "w");
-        assert_eq!(buffer[(32, 3)].symbol(), "w");
-        assert_eq!(buffer[(32, 4)].symbol(), "b");
-        assert_eq!(buffer[(32, 5)].symbol(), " ");
-        let row: String = buffer.content[200..300]
+        assert_eq!(buffer[(32, 1 + pad)].symbol(), "w");
+        assert_eq!(buffer[(32, 3 + 2 * pad)].symbol(), "w");
+        assert_eq!(buffer[(32, 4 + 2 * pad)].symbol(), "b");
+        assert_eq!(buffer[(32, 5 + 2 * pad)].symbol(), " ");
+        let start = usize::from(2 + pad) * 100;
+        let row: String = buffer.content[start..start + 100]
             .iter()
             .map(|cell| cell.symbol())
             .collect();
@@ -449,15 +456,16 @@ fn task_descriptions_use_a_dim_preview_without_extra_empty_rows() -> Result<()> 
         let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(!text.contains("second line"));
         if focused {
-            assert_eq!(buffer[(26, 1)].symbol(), ">");
-            assert_eq!(buffer[(26, 1)].fg, Color::Black);
-            assert_eq!(preview.bg, Color::LightYellow);
-            assert!(buffer[(32, 1)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(26, 1)].symbol(), "╭");
+            assert_eq!(buffer[(26, 1)].fg, Color::LightYellow);
+            assert_eq!(buffer[(26, 4)].symbol(), "╰");
+            assert_eq!(buffer[(32, 2)].bg, Color::Reset);
+            assert!(buffer[(32, 2)].modifier.contains(Modifier::BOLD));
         }
     }
     app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))?;
     terminal.draw(|frame| draw(frame, &app))?;
-    assert_eq!(terminal.backend().buffer()[(26, 3)].symbol(), ">");
+    assert_eq!(terminal.backend().buffer()[(26, 3)].symbol(), "╭");
     assert_eq!(app.selected_task, 1);
     Ok(())
 }
@@ -872,14 +880,21 @@ fn only_focused_section_has_a_highlight() -> Result<()> {
                     .any(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
             })
             .count();
-        assert_eq!(highlighted_rows, 1, "section {key}");
+        let boxes = selection_boxes(terminal.backend().buffer());
+        assert_eq!(highlighted_rows + boxes, 1, "section {key}");
+        assert_eq!(boxes, usize::from(key == '0'), "section {key}");
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(3, 1)].symbol(), "T", "Inbox indent changed");
         assert_eq!(buffer[(3, 9)].symbol(), "W", "Projects indent changed");
         for bottom in [7, 15, 23] {
             assert_eq!(buffer[(0, bottom)].symbol(), "╰", "Uneven section heights");
         }
-        assert_eq!(buffer[(28, 1)].symbol(), "[", "Tasks indent changed");
+        let first_task = 1 + u16::from(key == '0');
+        assert_eq!(
+            buffer[(28, first_task)].symbol(),
+            "[",
+            "Tasks indent changed"
+        );
     }
     Ok(())
 }

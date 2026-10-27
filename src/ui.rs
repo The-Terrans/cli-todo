@@ -89,6 +89,57 @@ fn selection_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+/// Selected tasks are boxed by `draw_task_list`, so they get no fill.
+fn task_selection_style() -> Style {
+    Style::default()
+        .fg(Color::Reset)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Pads a selected task so its border box does not cover the text.
+fn task_item(mut lines: Vec<Line<'static>>, selected: bool) -> ListItem<'static> {
+    if selected {
+        lines.insert(0, Line::default());
+        lines.push(Line::default());
+    }
+    ListItem::new(lines)
+}
+
+/// Renders tasks inside `block` and draws a border around the selected one.
+fn draw_task_list(
+    frame: &mut Frame,
+    area: Rect,
+    block: Block,
+    items: Vec<ListItem<'static>>,
+    selected: Option<usize>,
+) {
+    let heights: Vec<usize> = items.iter().map(ListItem::height).collect();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let mut state = ListState::default().with_selected(selected);
+    // The blank gutter leaves room for the box's left edge.
+    frame.render_stateful_widget(
+        List::new(items)
+            .highlight_spacing(HighlightSpacing::Always)
+            .highlight_symbol("  "),
+        inner,
+        &mut state,
+    );
+    let Some(selected) = selected else {
+        return;
+    };
+    let above: usize = heights[state.offset().min(selected)..selected].iter().sum();
+    let y = inner.y.saturating_add(above.min(u16::MAX as usize) as u16);
+    let height =
+        (heights[selected].min(u16::MAX as usize) as u16).min(inner.bottom().saturating_sub(y));
+    frame.render_widget(
+        Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::LightYellow)),
+        Rect::new(inner.x, y, inner.width, height),
+    );
+}
+
 fn draw_navigation(frame: &mut Frame, area: Rect, app: &App) {
     let active = matches!(app.mode, Mode::Browse)
         && app.navigation_focused
@@ -323,31 +374,34 @@ fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
     if let Some(area) = children {
         let focused = focused && view.focus == TaskPane::Subtasks;
         let today = Local::now().date_naive();
-        let items = view.children.iter().enumerate().map(|(index, child)| {
-            let style = if focused && index == view.selected_child {
-                selection_style()
-            } else {
-                Style::default().fg(Color::Reset)
-            };
-            ListItem::new(task_title_line(
-                &child.title,
-                child.done,
-                child.subtask_count,
-                child.due_date,
-                style,
-                today,
-            ))
-        });
-        let mut state = ListState::default().with_selected(focused.then_some(view.selected_child));
-        frame.render_stateful_widget(
-            List::new(items)
-                .block(panel(" Subtasks ", focused).border_type(BorderType::Rounded))
-                .style(Style::default().fg(Color::Black))
-                .highlight_spacing(HighlightSpacing::Always)
-                .highlight_style(Style::default().bg(Color::LightYellow))
-                .highlight_symbol("> "),
+        let items = view
+            .children
+            .iter()
+            .enumerate()
+            .map(|(index, child)| {
+                let selected = focused && index == view.selected_child;
+                let style = if selected {
+                    task_selection_style()
+                } else {
+                    Style::default().fg(Color::Reset)
+                };
+                let title = task_title_line(
+                    &child.title,
+                    child.done,
+                    child.subtask_count,
+                    child.due_date,
+                    style,
+                    today,
+                );
+                task_item(vec![title], selected)
+            })
+            .collect();
+        draw_task_list(
+            frame,
             area,
-            &mut state,
+            panel(" Subtasks ", focused).border_type(BorderType::Rounded),
+            items,
+            focused.then_some(view.selected_child),
         );
     }
 }
@@ -356,8 +410,9 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
     let active = matches!(app.mode, Mode::Browse) && !app.navigation_focused;
     let today = Local::now().date_naive();
     let items = app.tasks.iter().enumerate().map(|(index, task)| {
-        let title_style = if active && index == app.selected_task {
-            selection_style()
+        let selected = active && index == app.selected_task;
+        let title_style = if selected {
+            task_selection_style()
         } else {
             Style::default().fg(Color::Reset)
         };
@@ -375,16 +430,13 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
             .filter(|_| app.current_project.is_none())
             .and_then(|id| app.projects.iter().find(|project| project.id == id))
         {
-            let color = if index == app.selected_task && active {
-                Color::DarkGray
-            } else {
-                Color::Gray
-            };
             title.spans.insert(
                 1,
                 Span::styled(
                     format!(" [{}]", project.name),
-                    Style::default().fg(color).remove_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Gray)
+                        .remove_modifier(Modifier::BOLD),
                 ),
             );
         }
@@ -407,10 +459,8 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::DIM),
             ));
         }
-        ListItem::new(lines)
+        task_item(lines, selected)
     });
-    let mut state = ListState::default()
-        .with_selected((active && !app.tasks.is_empty()).then_some(app.selected_task));
     let mut title = project_title(app, "─[0]─Tasks", app.current_project);
     title.push_str(&format!(" · {}", FILTERS[app.selected_filter].0));
     if app.sort != Sort::Manual {
@@ -418,15 +468,12 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
             title.push_str(&format!(" · {label}"));
         }
     }
-    frame.render_stateful_widget(
-        List::new(items)
-            .highlight_spacing(HighlightSpacing::Always)
-            .block(panel(&title, !app.navigation_focused).border_type(BorderType::Rounded))
-            .style(Style::default().fg(Color::Black))
-            .highlight_style(Style::default().bg(Color::LightYellow))
-            .highlight_symbol("> "),
+    draw_task_list(
+        frame,
         area,
-        &mut state,
+        panel(&title, !app.navigation_focused).border_type(BorderType::Rounded),
+        items.collect(),
+        (active && !app.tasks.is_empty()).then_some(app.selected_task),
     );
     if app.tasks.is_empty() {
         frame.render_widget(
@@ -758,15 +805,10 @@ fn task_title_line(
         subtask_count_label(count)
     ))];
     if let Some(date) = due {
-        let selected = style.bg == Some(Color::LightYellow);
         let overdue = is_overdue(date, done, today);
         let color = if overdue {
-            if selected {
-                Color::Red
-            } else {
-                Color::LightRed
-            }
-        } else if done || selected {
+            Color::LightRed
+        } else if done {
             Color::DarkGray
         } else {
             Color::Gray
