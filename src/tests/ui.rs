@@ -4,6 +4,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
 use std::path::Path;
 
+/// Counts rows with a yellow selection border in column `x`.
+fn selection_rows(buffer: &ratatui::buffer::Buffer, x: u16) -> usize {
+    (0..buffer.area.height)
+        .filter(|&y| buffer[(x, y)].symbol() == "│" && buffer[(x, y)].fg == Color::LightYellow)
+        .count()
+}
+
 #[test]
 fn live_date_keywords_are_highlighted_and_escape_removes_the_highlight() -> Result<()> {
     let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
@@ -178,13 +185,7 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
         0,
         "no editor popup"
     );
-    assert_eq!(
-        cells
-            .iter()
-            .filter(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
-            .count(),
-        0
-    );
+    assert_eq!(selection_rows(terminal.backend().buffer(), 26), 0);
     let corners: Vec<_> = cells
         .iter()
         .enumerate()
@@ -195,13 +196,7 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
     app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))?;
     terminal.draw(|frame| draw(frame, &app))?;
     let cells = &terminal.backend().buffer().content;
-    assert_eq!(
-        cells
-            .iter()
-            .filter(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
-            .count(),
-        1
-    );
+    assert_eq!(selection_rows(terminal.backend().buffer(), 26), 1);
     let corners: Vec<_> = cells
         .iter()
         .enumerate()
@@ -232,8 +227,8 @@ fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
     assert_eq!(overdue.spans[0].content, "[ ] dated (2 subtasks)");
     assert_eq!(overdue.spans[1].content, " [due: 2026-08-14]");
     assert_eq!(overdue.spans[1].style.fg, Some(Color::LightRed));
-    let selected = task_title_line("dated", false, 0, due, selection_style(), today);
-    assert_eq!(selected.spans[1].style.fg, Some(Color::Red));
+    let selected = task_title_line("dated", false, 0, due, task_selection_style(), today);
+    assert_eq!(selected.spans[1].style.fg, Some(Color::LightRed));
     let completed = task_title_line("dated", true, 0, due, Style::default(), today);
     assert_eq!(completed.spans[1].style.fg, Some(Color::DarkGray));
     let due_today = task_title_line("dated", false, 0, Some(today), Style::default(), today);
@@ -435,6 +430,7 @@ fn task_descriptions_use_a_dim_preview_without_extra_empty_rows() -> Result<()> 
         let preview = &buffer[(32, 2)];
         assert_eq!(preview.symbol(), "f");
         assert_eq!(preview.fg, Color::DarkGray);
+        assert_eq!(preview.bg, Color::Reset);
         assert!(preview.modifier.contains(Modifier::DIM));
         assert!(!preview.modifier.contains(Modifier::BOLD));
         assert_eq!(buffer[(32, 1)].symbol(), "w");
@@ -449,15 +445,22 @@ fn task_descriptions_use_a_dim_preview_without_extra_empty_rows() -> Result<()> 
         let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(!text.contains("second line"));
         if focused {
-            assert_eq!(buffer[(26, 1)].symbol(), ">");
-            assert_eq!(buffer[(26, 1)].fg, Color::Black);
-            assert_eq!(preview.bg, Color::LightYellow);
+            for row in [1, 2] {
+                assert_eq!(buffer[(26, row)].symbol(), "│");
+                assert_eq!(buffer[(26, row)].fg, Color::LightYellow);
+                assert_eq!(buffer[(27, row)].symbol(), " ", "left padding");
+                assert_eq!(buffer[(97, row)].symbol(), " ", "right padding");
+                assert_eq!(buffer[(98, row)].symbol(), "│");
+            }
+            assert_eq!(selection_rows(buffer, 26), 2);
+            assert_eq!(buffer[(32, 1)].bg, Color::Reset);
             assert!(buffer[(32, 1)].modifier.contains(Modifier::BOLD));
         }
     }
     app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))?;
     terminal.draw(|frame| draw(frame, &app))?;
-    assert_eq!(terminal.backend().buffer()[(26, 3)].symbol(), ">");
+    assert_eq!(terminal.backend().buffer()[(26, 3)].fg, Color::LightYellow);
+    assert_eq!(selection_rows(terminal.backend().buffer(), 26), 1);
     assert_eq!(app.selected_task, 1);
     Ok(())
 }
@@ -872,7 +875,9 @@ fn only_focused_section_has_a_highlight() -> Result<()> {
                     .any(|cell| cell.symbol() == ">" && cell.bg == Color::LightYellow)
             })
             .count();
-        assert_eq!(highlighted_rows, 1, "section {key}");
+        let bordered_rows = selection_rows(terminal.backend().buffer(), 26);
+        assert_eq!(highlighted_rows + bordered_rows, 1, "section {key}");
+        assert_eq!(bordered_rows, usize::from(key == '0'), "section {key}");
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(3, 1)].symbol(), "T", "Inbox indent changed");
         assert_eq!(buffer[(3, 9)].symbol(), "W", "Projects indent changed");
