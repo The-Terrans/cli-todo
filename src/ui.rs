@@ -1065,7 +1065,7 @@ fn draw_palette(frame: &mut Frame, app: &App) {
     .split(block.inner(area));
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
-    let search = format!("Search tasks/actions: {query}");
+    let search = format!("Search tasks/projects/actions: {query}");
     let cursor = crate::editor::TextCursor::default();
     let scroll = cursor.horizontal_scroll(&search, rows[0].width);
     frame.render_widget(Paragraph::new(search.as_str()).scroll((0, scroll)), rows[0]);
@@ -1073,7 +1073,10 @@ fn draw_palette(frame: &mut Frame, app: &App) {
 
     let actions = app.palette_results();
     if actions.is_empty() {
-        frame.render_widget(Paragraph::new("No matching tasks or actions"), rows[1]);
+        frame.render_widget(
+            Paragraph::new("No matching tasks, projects or actions"),
+            rows[1],
+        );
     } else {
         let mut state = ListState::default().with_selected(Some(*selected));
         frame.render_stateful_widget(

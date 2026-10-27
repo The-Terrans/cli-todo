@@ -1343,6 +1343,37 @@ fn palette_finds_tasks_outside_current_filter() -> Result<()> {
 }
 
 #[test]
+fn palette_finds_and_opens_projects() -> Result<()> {
+    let mut app = app()?;
+    db::save_project(&app.db, None, "Home")?;
+    db::save_project(&app.db, None, "Work Stuff")?;
+    let work = app.db.last_insert_rowid();
+    db::create_task(&app.db, "report", Some(work))?;
+    let report = app.db.last_insert_rowid();
+    db::save_task(&app.db, None, "inbox task")?;
+    app.refresh_projects()?;
+    app.select_filter(2)?;
+    search_actions(&mut app, "work")?;
+    let results = app.palette_results();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].0, "Project: Work Stuff");
+    assert_eq!(results[0].1, Action::OpenProject(work));
+    app.handle_key(KeyCode::Enter)?;
+    assert!(matches!(app.mode, Mode::Browse));
+    assert_eq!(app.current_project, Some(work));
+    assert_eq!(app.projects[app.selected_project].id, work);
+    assert!(app.projects_focused);
+    assert!(!app.navigation_focused);
+    assert_eq!(app.selected_filter, ALL_FILTER);
+    let tasks: Vec<_> = app.tasks.iter().map(|task| task.id).collect();
+    assert_eq!(tasks, [report]);
+    app.handle_key(KeyCode::Char('1'))?;
+    assert_eq!(app.selected_filter, 2, "palette jumps keep Inbox state");
+    assert_eq!(app.current_project, None);
+    Ok(())
+}
+
+#[test]
 fn palette_search_and_arrows_select_a_filter() -> Result<()> {
     let mut app = app()?;
     search_actions(&mut app, " SHOW ")?;
