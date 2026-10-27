@@ -28,7 +28,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Left / Right  Cycle sidebar sections or opened task panes",
     "  Enter         Focus preview; open task/subtask details",
     "  Esc           Parent task → task list → sidebar",
-    "  Ctrl+K        Search tasks and actions",
+    "  Ctrl+K        Search tasks, projects and actions",
     "  c             Create a SQLite checkpoint from any panel",
     "  p             Safely pull and apply the latest snapshot",
     "  Shift+P       Push committed snapshots",

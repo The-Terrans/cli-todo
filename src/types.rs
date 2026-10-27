@@ -52,6 +52,7 @@ pub enum Action {
     Delete,
     Move,
     ShowFilter(usize),
+    OpenProject(i64),
     OpenTask(i64),
     ResetHistory,
     Quit,

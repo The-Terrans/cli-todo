@@ -1072,6 +1072,12 @@ impl App {
                 self.select_filter(filter)?;
                 self.navigation_focused = false;
             }
+            Action::OpenProject(id) => {
+                self.commits_focused = false;
+                self.show_project(Some(id));
+                self.select_filter(ALL_FILTER)?;
+                self.navigation_focused = false;
+            }
             Action::OpenTask(id) => {
                 self.commits_focused = false;
                 if let Some(project) = self
@@ -1080,20 +1086,7 @@ impl App {
                     .find(|task| task.id == id)
                     .map(|task| task.project_id)
                 {
-                    if project.is_some() {
-                        self.leave_inbox();
-                    } else {
-                        self.inbox_state = None;
-                    }
-                    self.current_project = project;
-                    self.projects_focused = project.is_some();
-                    if let Some(index) = self
-                        .projects
-                        .iter()
-                        .position(|candidate| Some(candidate.id) == project)
-                    {
-                        self.selected_project = index;
-                    }
+                    self.show_project(project);
                 }
                 self.select_filter(ALL_FILTER)?;
                 if let Some(index) = self.tasks.iter().position(|task| task.id == id) {
@@ -1106,6 +1099,24 @@ impl App {
             Action::Quit => return Ok(true),
         }
         Ok(false)
+    }
+
+    /// Points the main list at `project`, or Inbox for `None`, for a palette jump.
+    fn show_project(&mut self, project: Option<i64>) {
+        if project.is_some() {
+            self.leave_inbox();
+        } else {
+            self.inbox_state = None;
+        }
+        self.current_project = project;
+        self.projects_focused = project.is_some();
+        if let Some(index) = self
+            .projects
+            .iter()
+            .position(|candidate| Some(candidate.id) == project)
+        {
+            self.selected_project = index;
+        }
     }
 
     fn toggle_palette(&mut self) -> Result<()> {
@@ -1153,6 +1164,17 @@ impl App {
             .into_iter()
             .map(|(label, action)| (format!("Action: {label}"), action))
             .collect();
+        results.extend(
+            self.projects
+                .iter()
+                .filter(|project| project.name.to_lowercase().contains(&query))
+                .map(|project| {
+                    (
+                        format!("Project: {}", project.name),
+                        Action::OpenProject(project.id),
+                    )
+                }),
+        );
         results.extend(
             self.palette_tasks
                 .iter()
