@@ -4,7 +4,10 @@ let
 in
 
 pkgs.mkShell {
+  # Pin rustc and cargo with clippy: mixed toolchains fail with E0514.
   packages = with pkgs; [
+    rustc
+    cargo
     rustfmt
     clippy
     pkg-config

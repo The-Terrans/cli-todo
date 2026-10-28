@@ -84,7 +84,7 @@ nix-shell
 cargo run
 ```
 
-`shell.nix` provides rustfmt, Clippy, pkg-config, and SQLite without requiring flakes. Install Rust, Cargo, and Git separately. First use downloads dependencies. The nixpkgs commit in `shell.nix` pins the development tools; `Cargo.lock` pins Rust dependencies. The root `flake.nix` and `flake.lock` are used for packaging, not the development shell.
+`shell.nix` provides Rust, Cargo, rustfmt, Clippy, pkg-config, and SQLite without requiring flakes, all from one nixpkgs pin so Clippy matches the compiler. Install Git separately. First use downloads dependencies. The nixpkgs commit in `shell.nix` pins the development tools; `Cargo.lock` pins Rust dependencies. The root `flake.nix` and `flake.lock` are used for packaging, not the development shell.
 
 Without Nix, install Git, a Rust toolchain, pkg-config, and SQLite development libraries, then run `cargo run`. Build without launching with `cargo build`.
 
