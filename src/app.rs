@@ -43,6 +43,7 @@ impl App {
             sort: Sort::default(),
             inbox_state: None,
             mode: Mode::Browse,
+            external_edit_requested: false,
             message: String::new(),
             db,
         };
@@ -297,6 +298,7 @@ impl App {
             KeyCode::Enter | KeyCode::Char('e') => {
                 self.execute_action(Action::Edit)?;
             }
+            KeyCode::Char('E') => self.request_external_edit()?,
             KeyCode::Char('d') => {
                 self.execute_action(Action::Delete)?;
             }
@@ -320,13 +322,8 @@ impl App {
         }
         if modifiers == KeyModifiers::CONTROL && matches!(key.code, KeyCode::Char('s' | 'S')) {
             if matches!(&self.mode, Mode::Edit(_, draft) if draft.focus != TaskField::Title) {
-                let changes = self.db.total_changes();
                 self.message.clear();
-                let result = self.save_edit();
-                if self.db.total_changes() != changes {
-                    self.update_commit_status();
-                }
-                result?;
+                self.save_task_edit()?;
             }
             return Ok(false);
         }
@@ -996,6 +993,7 @@ impl App {
                 return Ok(());
             }
             KeyCode::Char('e') => Action::Edit,
+            KeyCode::Char('E') => return self.request_external_edit(),
             KeyCode::Char('d') => Action::Delete,
             KeyCode::Char('m') => Action::Move,
             KeyCode::Char(' ') => Action::ToggleCompletion,
@@ -1354,6 +1352,23 @@ impl App {
             draft.cursors[TaskField::DueDate as usize] = Default::default();
         }
         draft.auto_date = next;
+    }
+
+    /// Opens the hovered task's popup and asks the event loop to hand it to VISUAL/EDITOR.
+    fn request_external_edit(&mut self) -> Result<()> {
+        self.execute_action(Action::Edit)?;
+        self.external_edit_requested = matches!(self.mode, Mode::Edit(..));
+        Ok(())
+    }
+
+    /// Saves the task popup, marking uncommitted changes when the database changed.
+    pub(crate) fn save_task_edit(&mut self) -> Result<()> {
+        let changes = self.db.total_changes();
+        let result = self.save_edit();
+        if self.db.total_changes() != changes {
+            self.update_commit_status();
+        }
+        result
     }
 
     fn cancel_edit(&mut self) {

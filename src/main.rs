@@ -57,15 +57,16 @@ impl Drop for CursorStyle {
     }
 }
 
-fn edit_task_externally(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
+/// Returns true when the editor's file was imported into the task popup.
+fn edit_task_externally(terminal: &mut DefaultTerminal, app: &mut App) -> Result<bool> {
     let types::Mode::Edit(_, draft) = &app.mode else {
-        return Ok(());
+        return Ok(false);
     };
     let session = match external_editor::ExternalEdit::prepare(draft) {
         Ok(session) => session,
         Err(error) => {
             app.message = error.to_string();
-            return Ok(());
+            return Ok(false);
         }
     };
     let result = (|| -> Result<()> {
@@ -83,10 +84,12 @@ fn edit_task_externally(terminal: &mut DefaultTerminal, app: &mut App) -> Result
         return Err(session.recovery_message(error).into());
     }
     match result {
-        Ok(()) => session.finish(app),
-        Err(error) => app.message = session.recovery_message(error),
+        Ok(()) => Ok(session.finish(app)),
+        Err(error) => {
+            app.message = session.recovery_message(error);
+            Ok(false)
+        }
     }
-    Ok(())
 }
 
 fn resume_terminal(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
@@ -121,6 +124,11 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     edit_task_externally(terminal, app)?;
                 } else if app.handle_key_event(key)? {
                     return Ok(());
+                } else if std::mem::take(&mut app.external_edit_requested)
+                    && edit_task_externally(terminal, app)?
+                {
+                    // Shift+E saves straight away; failures leave the popup open to fix or Esc.
+                    app.save_task_edit()?;
                 }
             }
             Event::Resize(width, height) => {

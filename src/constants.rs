@@ -48,6 +48,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Alt+J / Alt+K Move selected pending task down/up (Manual order)",
     "  Alt+Down/Up   Same as Alt+J / Alt+K",
     "  Shift+D       Nuke all data, local commits and remote settings",
+    "  Shift+E       Edit hovered task in VISUAL/EDITOR; saves on exit",
     "",
     "COMMITS (LEFT PANEL)",
     "  r             Set/change/remove origin",

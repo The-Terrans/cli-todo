@@ -204,5 +204,7 @@ pub struct App {
     /// Inbox filter and selected row, saved while a project list is shown.
     pub(crate) inbox_state: Option<(usize, usize)>,
     pub mode: Mode,
+    /// Set by Shift+E once the hovered task's popup is open; the event loop launches the editor.
+    pub(crate) external_edit_requested: bool,
     pub message: String,
 }
