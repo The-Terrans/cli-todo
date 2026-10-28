@@ -110,11 +110,14 @@ impl ExternalEdit {
                 if let Mode::Edit(_, draft) = &mut app.mode {
                     *draft = imported;
                 }
-                app.message = match fs::remove_dir_all(self.path.parent().unwrap()) {
+                // Shift+E saves right after this, so the message must not imply an unsaved draft.
+                let directory = self.path.parent().unwrap();
+                app.message = match fs::remove_dir_all(directory) {
                     Ok(()) => String::new(),
-                    Err(error) => self.recovery_message(format!(
-                        "Draft imported, but temporary cleanup failed: {error}"
-                    )),
+                    Err(error) => format!(
+                        "Temporary directory not removed: {} — {error}",
+                        directory.display()
+                    ),
                 };
                 true
             }
