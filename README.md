@@ -103,7 +103,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Enter                        | Focus task list; open task/subtask details               |
 | a                            | Add task; add child inside an opened task; add project in Projects |
 | e in Tasks                   | Edit task in a Title / Description / Due date popup       |
-| Shift+E in Tasks             | Edit hovered/opened task in an external editor; saves on exit |
+| Shift+E in Tasks             | Edit selected (or opened) task in an external editor; saves on exit |
 | e in Projects                | Rename project                                           |
 | Space                        | Toggle selected row (opened leaf: toggle that task)       |
 | x                            | Toggle opened/selected task between completed and pending |
@@ -170,7 +170,7 @@ Existing tasks get empty descriptions automatically. Descriptions persist across
 
 4. Save and exit the external editor. Changes return to the popup **without saving to the database**. Use the app's usual save controls, or Esc to discard.
 
-Shortcut: press **Shift+E** on a task in the task list (or on an opened task) to skip the popup. The same file opens in your editor, and a successful import **saves to the database immediately**. If the editor is missing or fails, or the file is invalid, the popup stays open with the original task and the recovery message; press Esc to leave it unchanged.
+Shortcut: press **Shift+E** on a task in the task list (or on an opened task) to skip the popup. In an opened task it edits that task, even when a subtask is highlighted. The same file opens in your editor, and a successful import **saves to the database immediately**. If the editor is missing or fails, or the file is invalid, the popup stays open with the original task and the recovery message; press Esc to leave it unchanged.
 
 When no date is set, the template shows `Due date: YYYY-MM-DD`. Existing dates remain unchanged in the template. Leave the placeholder unchanged or clear it for no deadline; replace it with a valid date such as `2028-02-29` to set one. Title must be nonblank. The description is everything after the blank separator, including its whitespace and final newline. Imported date phrases stay literal: the Due date header is authoritative. Subtasks, completion, project, and parent relationships are not edited by this file.
 
