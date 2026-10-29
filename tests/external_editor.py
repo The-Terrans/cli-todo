@@ -156,6 +156,17 @@ with tempfile.TemporaryDirectory(prefix="cli-todo external ") as directory:
         assert output.count(b"\x1b[?1049l") >= 5, "external editor must leave alternate screen"
         assert output.count(b"\x1b[2 q") >= 5, "block cursor must be restored after each editor exit"
 
+    with Harness(root / "shift e") as app:
+        app.send(b"aold\r\rE")
+        assert app.tasks() == [("new tomorrow", "next week stays literal\n", "2028-02-29")], "Shift+E must save on exit"
+        assert not app.recoveries()
+        (app.root / "mode").write_text("invalid")
+        assert b"Recovery:" in app.send(b"E")
+        app.send(b"\x1b")
+        assert app.tasks() == [("new tomorrow", "next week stays literal\n", "2028-02-29")]
+        assert len(app.recoveries()) == 1
+        app.finish()
+
     with Harness(root / "placeholder") as app:
         (app.root / "mode").write_text("placeholder")
         app.send(b"ano deadline\x07\r")

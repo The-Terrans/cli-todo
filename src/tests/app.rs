@@ -400,6 +400,33 @@ fn x_toggles_selected_tasks_in_the_main_list() -> Result<()> {
 }
 
 #[test]
+fn shift_e_requests_external_edit_only_for_a_hovered_task() -> Result<()> {
+    let mut app = app()?;
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Char('E'))?;
+    assert!(matches!(app.mode, Mode::Browse) && !app.external_edit_requested);
+    keys(
+        &mut app,
+        &[KeyCode::Char('a'), KeyCode::Char('t'), KeyCode::Enter],
+    )?;
+    app.handle_key(KeyCode::Char('1'))?;
+    app.handle_key(KeyCode::Char('E'))?;
+    assert!(matches!(app.mode, Mode::Browse) && !app.external_edit_requested);
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT))?;
+    let id = app.tasks[0].id;
+    assert!(matches!(&app.mode, Mode::Edit(Some(edited), _) if *edited == id));
+    assert!(app.external_edit_requested);
+    app.external_edit_requested = false;
+    app.handle_key(KeyCode::Esc)?;
+    app.handle_key(KeyCode::Enter)?;
+    app.handle_key(KeyCode::Char('E'))?;
+    assert!(matches!(&app.mode, Mode::Edit(Some(edited), _) if *edited == id));
+    assert!(app.external_edit_requested);
+    Ok(())
+}
+
+#[test]
 fn task_details_scroll_clamps_and_delete_returns_to_parent() -> Result<()> {
     let mut app = app()?;
     db::save_task_tree(

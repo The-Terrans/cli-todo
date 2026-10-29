@@ -97,7 +97,8 @@ impl ExternalEdit {
         format!("Recovery: {} — {error}", self.path.display())
     }
 
-    pub fn finish(self, app: &mut App) {
+    /// Returns true when the edited file was imported into the popup draft.
+    pub fn finish(self, app: &mut App) -> bool {
         let result = (|| -> Result<TaskDraft> {
             let Mode::Edit(_, previous) = &app.mode else {
                 return Err("Task popup is no longer open".into());
@@ -115,8 +116,12 @@ impl ExternalEdit {
                         "Draft imported, but temporary cleanup failed: {error}"
                     )),
                 };
+                true
             }
-            Err(error) => app.message = self.recovery_message(error),
+            Err(error) => {
+                app.message = self.recovery_message(error);
+                false
+            }
         }
     }
 }

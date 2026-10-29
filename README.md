@@ -84,7 +84,7 @@ nix-shell
 cargo run
 ```
 
-`shell.nix` provides rustfmt, Clippy, pkg-config, and SQLite without requiring flakes. Install Rust, Cargo, and Git separately. First use downloads dependencies. The nixpkgs commit in `shell.nix` pins the development tools; `Cargo.lock` pins Rust dependencies. The root `flake.nix` and `flake.lock` are used for packaging, not the development shell.
+`shell.nix` provides Rust, Cargo, rustfmt, Clippy, pkg-config, and SQLite without requiring flakes, all from one nixpkgs pin so Clippy matches the compiler. Install Git separately. First use downloads dependencies. The nixpkgs commit in `shell.nix` pins the development tools; `Cargo.lock` pins Rust dependencies. The root `flake.nix` and `flake.lock` are used for packaging, not the development shell.
 
 Without Nix, install Git, a Rust toolchain, pkg-config, and SQLite development libraries, then run `cargo run`. Build without launching with `cargo build`.
 
@@ -103,6 +103,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Enter                        | Focus task list; open task/subtask details               |
 | a                            | Add task; add child inside an opened task; add project in Projects |
 | e in Tasks                   | Edit task in a Title / Description / Due date popup       |
+| Shift+E in Tasks             | Edit hovered/opened task in an external editor; saves on exit |
 | e in Projects                | Rename project                                           |
 | Space                        | Toggle selected row (opened leaf: toggle that task)       |
 | x                            | Toggle opened/selected task between completed and pending |
@@ -169,11 +170,13 @@ Existing tasks get empty descriptions automatically. Descriptions persist across
 
 4. Save and exit the external editor. Changes return to the popup **without saving to the database**. Use the app's usual save controls, or Esc to discard.
 
+Shortcut: press **Shift+E** on a task in the task list (or on an opened task) to skip the popup. The same file opens in your editor, and a successful import **saves to the database immediately**. If the editor is missing or fails, or the file is invalid, the popup stays open with the original task and the recovery message; press Esc to leave it unchanged.
+
 When no date is set, the template shows `Due date: YYYY-MM-DD`. Existing dates remain unchanged in the template. Leave the placeholder unchanged or clear it for no deadline; replace it with a valid date such as `2028-02-29` to set one. Title must be nonblank. The description is everything after the blank separator, including its whitespace and final newline. Imported date phrases stay literal: the Due date header is authoritative. Subtasks, completion, project, and parent relationships are not edited by this file.
 
 Editor settings accept quoted executable paths and arguments, but never run through a shell: variables, pipes, and command substitutions are not expanded. Choose an editor/option that waits until editing finishes; a GUI editor that exits immediately cannot return later changes.
 
-Ctrl+G works only inside task/subtask popups, not browsing, search, or project/commit/remote dialogs. The app temporarily releases the terminal and restores its UI and block cursor afterward. A missing editor setting leaves the draft untouched. A failed editor or invalid file also leaves the draft untouched and retains the temporary file; the error starts with its recovery path. Successful imports remove the temporary directory. Recovery files contain todo text—remove them manually when no longer needed. On Linux/macOS, temporary directories and files are created with owner-only permissions (700/600).
+Ctrl+G works only inside task/subtask popups, not browsing (use Shift+E there), search, or project/commit/remote dialogs. The app temporarily releases the terminal and restores its UI and block cursor afterward. A missing editor setting leaves the draft untouched. A failed editor or invalid file also leaves the draft untouched and retains the temporary file; the error starts with its recovery path. Successful imports remove the temporary directory. Recovery files contain todo text—remove them manually when no longer needed. On Linux/macOS, temporary directories and files are created with owner-only permissions (700/600).
 
 ## Due dates
 
