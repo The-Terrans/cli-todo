@@ -267,6 +267,33 @@ fn editor_spawn_and_nonzero_exit_failures_retain_files() -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn cleanup_failure_after_import_names_the_directory_without_implying_a_draft() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let root = TempDirectory::new();
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
+    app.mode = Mode::Edit(None, TaskDraft::default());
+    let Mode::Edit(_, draft) = &app.mode else {
+        unreachable!()
+    };
+    let session = ExternalEdit::create(draft, command(), &root.0)?;
+    let directory = session.path.parent().unwrap().to_path_buf();
+    fs::write(&session.path, "Title: imported\nDue date: YYYY-MM-DD\n\n")?;
+    // A read-only parent blocks removing the session directory.
+    fs::set_permissions(&root.0, fs::Permissions::from_mode(0o500))?;
+    assert!(session.finish(&mut app));
+    fs::set_permissions(&root.0, fs::Permissions::from_mode(0o700))?;
+    if !directory.exists() {
+        return Ok(()); // Running as root ignores the read-only parent.
+    }
+    assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "imported"));
+    assert!(app.message.starts_with("Temporary directory not removed: "));
+    assert!(app.message.contains(directory.to_str().unwrap()));
+    assert!(!app.message.contains("Recovery") && !app.message.contains("Draft"));
+    Ok(())
+}
+
 #[test]
 fn recovery_paths_wrap_in_task_popup_errors() -> Result<()> {
     use ratatui::{backend::TestBackend, Terminal};
