@@ -99,7 +99,7 @@ class Harness:
             return db.execute("SELECT title,description,due_date FROM tasks ORDER BY id").fetchall()
 
     def recoveries(self):
-        return list(self.temporary.glob("cli-todo-edit-*/task.txt"))
+        return list(self.temporary.glob("cli-todo-edit-*/task.md"))
 
     def finish(self):
         self.send(b"q")
