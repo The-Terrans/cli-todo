@@ -55,7 +55,7 @@ impl ExternalEdit {
                 Err(error) => return Err(error.into()),
                 Ok(()) => {}
             }
-            let path = directory.join("task.txt");
+            let path = directory.join("task.md");
             let result = (|| -> Result<()> {
                 let mut options = OpenOptions::new();
                 options.write(true).create_new(true);

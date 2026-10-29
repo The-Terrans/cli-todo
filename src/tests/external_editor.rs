@@ -308,7 +308,7 @@ fn recovery_paths_wrap_in_task_popup_errors() -> Result<()> {
             },
         );
         app.message = format!(
-            "Recovery: /tmp/{}/task.txt — invalid external format",
+            "Recovery: /tmp/{}/task.md — invalid external format",
             "private-directory/".repeat(7)
         );
         let mut terminal = Terminal::new(TestBackend::new(80, 25))?;
@@ -321,7 +321,7 @@ fn recovery_paths_wrap_in_task_popup_errors() -> Result<()> {
             .map(|cell| cell.symbol())
             .collect();
         assert!(
-            text.contains("task.txt"),
+            text.contains("task.md"),
             "recovery path tail must be visible"
         );
         assert!(text.contains("invalid external format"));

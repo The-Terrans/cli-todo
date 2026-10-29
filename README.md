@@ -158,7 +158,7 @@ Existing tasks get empty descriptions automatically. Descriptions persist across
 
 1. Set **VISUAL** or **EDITOR** to an installed editor, for example `export EDITOR=nvim` or `export VISUAL='code --wait'`. The first nonempty setting wins: VISUAL, then EDITOR. There is no fallback editor or automatic installation.
 2. Open a task creation/edit popup and press **Ctrl+G** from any field.
-3. Edit the private temporary file, preserving its two headers and blank separator:
+3. Edit the private temporary `task.md` file, preserving its two headers and blank separator:
 
    ```text
    Title: Buy groceries
