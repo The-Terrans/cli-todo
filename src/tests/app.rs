@@ -146,10 +146,12 @@ fn task_views_drill_down_add_children_edit_and_complete_without_popups() -> Resu
         .all(|task| task.done));
     app.handle_key(KeyCode::Char(' '))?;
     assert!(app.task_view.as_ref().unwrap().task.done);
-    assert!(!app.task_view.as_ref().unwrap().children[1].done);
+    // The reopened child moves above its completed sibling.
+    let reopened = &app.task_view.as_ref().unwrap().children[0];
+    assert!(reopened.title == "added" && !reopened.done);
     app.handle_key(KeyCode::Char('x'))?;
     assert!(!app.task_view.as_ref().unwrap().task.done);
-    assert!(!app.task_view.as_ref().unwrap().children[1].done);
+    assert!(!app.task_view.as_ref().unwrap().children[0].done);
     app.handle_key(KeyCode::Char('x'))?;
     assert!(db::list_tasks(&app.db, Filter::All)?
         .iter()
@@ -1731,6 +1733,94 @@ fn alt_j_and_k_reorder_tasks_and_focused_subtasks() -> Result<()> {
             .collect::<Vec<_>>(),
         ["child b", "child a"]
     );
+    Ok(())
+}
+
+#[test]
+fn completed_subtasks_sort_below_pending_ones_and_keep_their_place() -> Result<()> {
+    let mut app = app()?;
+    create_task(&mut app, "parent")?;
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Enter)?;
+    for title in ["a", "b", "c"] {
+        create_task(&mut app, title)?;
+    }
+    let children = |app: &App| -> Vec<String> {
+        let view = app.task_view.as_ref().unwrap();
+        view.children
+            .iter()
+            .map(|task| task.title.clone())
+            .collect()
+    };
+    let alt = |app: &mut App, character| {
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(character), KeyModifiers::ALT))
+    };
+    keys(&mut app, &[KeyCode::Right, KeyCode::Up, KeyCode::Up])?;
+    app.handle_key(KeyCode::Char(' '))?;
+    assert_eq!(children(&app), ["b", "c", "a"]);
+    assert_eq!(app.task_view.as_ref().unwrap().selected_child, 0);
+    app.db.execute(
+        "UPDATE tasks SET completed_at='2000-01-01 00:00:00.000' WHERE title='a'",
+        [],
+    )?;
+    app.handle_key(KeyCode::Char(' '))?;
+    assert_eq!(children(&app), ["c", "b", "a"], "newest completion first");
+    for (key, character) in [(KeyCode::Down, 'k'), (KeyCode::Up, 'j')] {
+        app.handle_key(key)?;
+        alt(&mut app, character)?;
+        assert_eq!(
+            app.message,
+            "Completed tasks stay ordered by completion date"
+        );
+        assert_eq!(children(&app), ["c", "b", "a"]);
+    }
+    keys(
+        &mut app,
+        &[KeyCode::Down, KeyCode::Down, KeyCode::Char(' ')],
+    )?;
+    assert_eq!(
+        children(&app),
+        ["a", "c", "b"],
+        "reopened keeps manual order"
+    );
+    Ok(())
+}
+
+#[test]
+fn subtasks_follow_the_shown_lists_sort_and_reorder_only_in_manual_order() -> Result<()> {
+    let mut app = app()?;
+    create_task(&mut app, "parent")?;
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Enter)?;
+    for title in ["a", "b", "c"] {
+        create_task(&mut app, title)?;
+    }
+    let children = |app: &App| -> Vec<String> {
+        let view = app.task_view.as_ref().unwrap();
+        view.children
+            .iter()
+            .map(|task| task.title.clone())
+            .collect()
+    };
+    keys(
+        &mut app,
+        &[
+            KeyCode::Char('r'),
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Enter,
+        ],
+    )?;
+    assert_eq!(app.sort, Sort::CreatedDesc);
+    assert_eq!(children(&app), ["c", "b", "a"]);
+    keys(&mut app, &[KeyCode::Right, KeyCode::Up, KeyCode::Char(' ')])?;
+    assert_eq!(children(&app), ["c", "a", "b"], "completed still sink");
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::ALT))?;
+    assert_eq!(
+        app.message,
+        "Press r and choose Manual order to reorder tasks"
+    );
+    assert_eq!(children(&app), ["c", "a", "b"]);
     Ok(())
 }
 

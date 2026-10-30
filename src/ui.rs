@@ -51,6 +51,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_dialog(frame, app);
 }
 
+/// ` · <label>` for a non-manual sort, shown in list titles; empty for Manual order.
+fn sort_suffix(sort: Sort) -> String {
+    SORTS
+        .iter()
+        .find(|(_, candidate)| *candidate == sort && sort != Sort::Manual)
+        .map_or_else(String::new, |(label, _)| format!(" · {label}"))
+}
+
 fn panel(title: &str, focused: bool) -> Block<'_> {
     let border = if focused {
         Style::default()
@@ -398,7 +406,8 @@ fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
         draw_task_list(
             frame,
             area,
-            panel(" Subtasks ", focused).border_type(BorderType::Rounded),
+            panel(&format!(" Subtasks{} ", sort_suffix(app.sort)), focused)
+                .border_type(BorderType::Rounded),
             items,
             focused.then_some(view.selected_child),
         );
@@ -462,11 +471,7 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
     });
     let mut title = project_title(app, "─[0]─Tasks", app.current_project);
     title.push_str(&format!(" · {}", FILTERS[app.selected_filter].0));
-    if app.sort != Sort::Manual {
-        if let Some((label, _)) = SORTS.iter().find(|(_, sort)| *sort == app.sort) {
-            title.push_str(&format!(" · {label}"));
-        }
-    }
+    title.push_str(&sort_suffix(app.sort));
     draw_task_list(
         frame,
         area,
