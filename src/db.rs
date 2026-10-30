@@ -549,14 +549,14 @@ pub fn list_tasks_in(
     Ok(tasks)
 }
 
-/// Children of `parent` in manual order, completed ones last, most recently completed first.
-pub fn subtasks_of(tasks: &[Task], parent: i64) -> Vec<Task> {
+/// Children of `parent`, pending first in `sort` order, then most recently completed first.
+pub fn subtasks_of(tasks: &[Task], parent: i64, sort: Sort) -> Vec<Task> {
     let mut children: Vec<_> = tasks
         .iter()
         .filter(|task| task.parent_id == Some(parent))
         .cloned()
         .collect();
-    children.sort_by(|a, b| compare_tasks(a, b, Sort::Manual));
+    children.sort_by(|a, b| compare_tasks(a, b, sort));
     children
 }
 

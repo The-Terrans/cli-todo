@@ -1787,6 +1787,44 @@ fn completed_subtasks_sort_below_pending_ones_and_keep_their_place() -> Result<(
 }
 
 #[test]
+fn subtasks_follow_the_shown_lists_sort_and_reorder_only_in_manual_order() -> Result<()> {
+    let mut app = app()?;
+    create_task(&mut app, "parent")?;
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Enter)?;
+    for title in ["a", "b", "c"] {
+        create_task(&mut app, title)?;
+    }
+    let children = |app: &App| -> Vec<String> {
+        let view = app.task_view.as_ref().unwrap();
+        view.children
+            .iter()
+            .map(|task| task.title.clone())
+            .collect()
+    };
+    keys(
+        &mut app,
+        &[
+            KeyCode::Char('r'),
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Enter,
+        ],
+    )?;
+    assert_eq!(app.sort, Sort::CreatedDesc);
+    assert_eq!(children(&app), ["c", "b", "a"]);
+    keys(&mut app, &[KeyCode::Right, KeyCode::Up, KeyCode::Char(' ')])?;
+    assert_eq!(children(&app), ["c", "a", "b"], "completed still sink");
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::ALT))?;
+    assert_eq!(
+        app.message,
+        "Press r and choose Manual order to reorder tasks"
+    );
+    assert_eq!(children(&app), ["c", "a", "b"]);
+    Ok(())
+}
+
+#[test]
 fn filter_popup_only_filters_projects() -> Result<()> {
     let mut app = app()?;
     db::save_project(&app.db, None, "Work")?;

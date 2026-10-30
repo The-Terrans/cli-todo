@@ -137,7 +137,7 @@ impl App {
                         .current_project
                         .is_none_or(|project| task.project_id == Some(project))
             }) {
-                let children = db::subtasks_of(&tasks, id);
+                let children = db::subtasks_of(&tasks, id, self.sort);
                 let selected_child = if id == old_id {
                     selected.min(children.len().saturating_sub(1))
                 } else {
@@ -198,7 +198,7 @@ impl App {
             self.task_path.reverse();
         }
         let parent_title = parent_title(&tasks, &task);
-        let children = db::subtasks_of(&tasks, id);
+        let children = db::subtasks_of(&tasks, id, self.sort);
         self.task_view = Some(TaskView {
             focus: TaskPane::Details,
             task,
@@ -347,12 +347,12 @@ impl App {
             return Ok(());
         }
         let (tasks, selected) = match &self.task_view {
-            Some(view) if view.focus == TaskPane::Subtasks => (&view.children, view.selected_child),
-            Some(_) => return Ok(()),
-            None if self.sort != Sort::Manual => {
+            Some(view) if view.focus != TaskPane::Subtasks => return Ok(()),
+            _ if self.sort != Sort::Manual => {
                 self.message = "Press r and choose Manual order to reorder tasks".into();
                 return Ok(());
             }
+            Some(view) => (&view.children, view.selected_child),
             None => (&self.tasks, self.selected_task),
         };
         let Some(target) = (if down {

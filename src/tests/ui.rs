@@ -178,6 +178,10 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
     assert!(text.contains("inline description"));
     assert!(text.contains("Due: 2000-01-01"));
     assert!(text.contains("Subtasks"));
+    assert!(
+        !text.contains("Subtasks ·"),
+        "manual order has no sort label"
+    );
     assert!(text.contains("[ ] child"));
     assert!(!text.contains("Edit task: Title"));
     assert_eq!(
@@ -193,6 +197,17 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
         .map(|(_, cell)| cell.fg)
         .collect();
     assert_eq!(corners, vec![Color::LightYellow, Color::DarkGray]);
+    app.sort = Sort::CreatedDesc;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("Subtasks · Created date ↓ (newest first)"));
+    app.sort = Sort::Manual;
     app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))?;
     terminal.draw(|frame| draw(frame, &app))?;
     let cells = &terminal.backend().buffer().content;
