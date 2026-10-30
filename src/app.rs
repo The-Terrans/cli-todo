@@ -137,11 +137,7 @@ impl App {
                         .current_project
                         .is_none_or(|project| task.project_id == Some(project))
             }) {
-                let children: Vec<_> = tasks
-                    .iter()
-                    .filter(|child| child.parent_id == Some(id))
-                    .cloned()
-                    .collect();
+                let children = db::subtasks_of(&tasks, id);
                 let selected_child = if id == old_id {
                     selected.min(children.len().saturating_sub(1))
                 } else {
@@ -202,10 +198,7 @@ impl App {
             self.task_path.reverse();
         }
         let parent_title = parent_title(&tasks, &task);
-        let children = tasks
-            .into_iter()
-            .filter(|child| child.parent_id == Some(id))
-            .collect();
+        let children = db::subtasks_of(&tasks, id);
         self.task_view = Some(TaskView {
             focus: TaskPane::Details,
             task,
@@ -372,7 +365,7 @@ impl App {
         let (Some(task), Some(neighbour)) = (tasks.get(selected), tasks.get(target)) else {
             return Ok(());
         };
-        if self.task_view.is_none() && (task.done || neighbour.done) {
+        if task.done || neighbour.done {
             self.message = "Completed tasks stay ordered by completion date".into();
             return Ok(());
         }

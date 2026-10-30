@@ -78,7 +78,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Left / Right  Cycle task details / subtask list",
     "  Up / Down     Scroll details or select a focused child",
     "  Enter         Open selected child when Subtasks is focused",
-    "  Alt+J / Alt+K Move the focused child down/up (or Alt+Down/Up)",
+    "  Alt+J / Alt+K Move the focused pending child down/up (or Alt+Down/Up)",
     "  Enter / e     Edit when Details is focused; e works in either pane",
     "  x             Toggle opened task; completing cascades",
     "  d             Delete opened task and descendants with confirmation",

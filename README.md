@@ -112,7 +112,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | m in Tasks                   | Move task to a project or No project; arrows and Enter choose |
 | f in a project               | Filter its tasks: Today / All / Pending / Completed popup  |
 | r outside Commits            | Sort pending tasks: Manual / Created date ↑ / ↓ popup      |
-| Alt+J / Alt+K (or Alt+Down / Alt+Up) in Tasks | Move selected pending task (Manual order) or focused subtask down/up; order is saved |
+| Alt+J / Alt+K (or Alt+Down / Alt+Up) in Tasks | Move selected pending task (Manual order) or focused pending subtask down/up; order is saved |
 | c while browsing             | Commit a safe todo SQLite snapshot from any panel         |
 | r in Commits                 | Set/change origin URL; empty input removes it             |
 | p / P while browsing         | Safely pull and apply a snapshot / push checkpoints, from any panel |
@@ -136,7 +136,7 @@ Navigation offers Today, All, Pending, and Completed filters. **Today** is the s
 
 ## Opened tasks
 
-Press **Enter** on a task to replace the right-hand list with its title, description, status, and due date—no popup. The **Task details** header shows the task's project, like the task list. A second **Subtasks** section appears only when children exist. Details uses one third of the right-panel height, with a 6-row minimum (7 for subtasks); Subtasks gets the rest. Small terminals shrink Details safely, retaining space for Subtasks. Without children, Details fills the panel. Within Details, the title (with completion checkbox), a **Parent:** line naming the parent task (subtasks only), and date stay pinned at the top; a divider separates the scrollable Description below. This split does not change the overall detail height.
+Press **Enter** on a task to replace the right-hand list with its title, description, status, and due date—no popup. The **Task details** header shows the task's project, like the task list. A second **Subtasks** section appears only when children exist; like the task list, completed children sit below pending ones, most recently completed first, while pending children keep their manual order. Details uses one third of the right-panel height, with a 6-row minimum (7 for subtasks); Subtasks gets the rest. Small terminals shrink Details safely, retaining space for Subtasks. Without children, Details fills the panel. Within Details, the title (with completion checkbox), a **Parent:** line naming the parent task (subtasks only), and date stay pinned at the top; a divider separates the scrollable Description below. This split does not change the overall detail height.
 
 1. Details are focused first. **Left/Right** cycles Details ↔ Subtasks when children exist, like the sidebar. **Tab/Shift+Tab** switches between the whole left and right panels, preserving the opened task, selected child, scroll position, and Details/Subtasks focus. In Subtasks, **Up/Down** selects a child and **Enter** opens its details.
 2. **a** opens a creation form for a child of the opened task. Saving returns to the parent view; Esc cancels.

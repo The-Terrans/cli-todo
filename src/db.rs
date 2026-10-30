@@ -545,17 +545,31 @@ pub fn list_tasks_in(
                 && due.as_ref().is_none_or(|due| due.contains(&task.id))
         })
         .collect();
-    // Stable sort: ties keep the manual order. Ids grow with creation, so they order by creation.
-    tasks.sort_by(|a, b| {
-        a.done.cmp(&b.done).then_with(|| match (a.done, sort) {
-            // `None` sorts before `Some`, so reversing puts unrecorded completions last.
-            (true, _) => b.completed_at.cmp(&a.completed_at),
-            (false, Sort::Manual) => Ordering::Equal,
-            (false, Sort::CreatedAsc) => a.id.cmp(&b.id),
-            (false, Sort::CreatedDesc) => b.id.cmp(&a.id),
-        })
-    });
+    tasks.sort_by(|a, b| compare_tasks(a, b, sort));
     Ok(tasks)
+}
+
+/// Children of `parent` in manual order, completed ones last, most recently completed first.
+pub fn subtasks_of(tasks: &[Task], parent: i64) -> Vec<Task> {
+    let mut children: Vec<_> = tasks
+        .iter()
+        .filter(|task| task.parent_id == Some(parent))
+        .cloned()
+        .collect();
+    children.sort_by(|a, b| compare_tasks(a, b, Sort::Manual));
+    children
+}
+
+/// Pending tasks in `sort` order, then completed tasks, most recently completed first.
+/// Meant for stable sorts: ties keep the manual order. Ids grow with creation, so they order by creation.
+fn compare_tasks(a: &Task, b: &Task, sort: Sort) -> Ordering {
+    a.done.cmp(&b.done).then_with(|| match (a.done, sort) {
+        // `None` sorts before `Some`, so reversing puts unrecorded completions last.
+        (true, _) => b.completed_at.cmp(&a.completed_at),
+        (false, Sort::Manual) => Ordering::Equal,
+        (false, Sort::CreatedAsc) => a.id.cmp(&b.id),
+        (false, Sort::CreatedDesc) => b.id.cmp(&a.id),
+    })
 }
 
 /// Top-level ids whose task or any descendant is unfinished and due on or before `today`.
