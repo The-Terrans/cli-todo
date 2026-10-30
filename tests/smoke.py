@@ -59,6 +59,7 @@ with tempfile.TemporaryDirectory() as data:
 
     def finish(expected):
         assert proc.wait(timeout=3) == expected
+        screen()
         assert termios.tcgetattr(slave) == before, "terminal attributes not restored"
         output = b"".join(captured)
         assert b"\x1b[2 q" in output, "steady native block cursor was not requested"
@@ -158,10 +159,9 @@ with tempfile.TemporaryDirectory() as data:
         while b"snapshot committed" not in committed:
             assert time.monotonic() < deadline, f"checkpoint did not finish: {committed!r}"
             committed += b" " + screen()
-        assert b"Author:" in send(b"3")
+        wait_for_output(screen, b"Author:", initial=send(b"3"))
         send(b"1")
-        notification = send(b"c")
-        assert b"changes to commit" in notification, notification
+        wait_for_output(screen, b"changes to commit", initial=send(b"c"))
         send(b"q")
         assert proc.poll() is None, "no-changes popup should only close with Enter/Esc"
         assert subprocess.check_output(["git", "-C", str(dbpath.parent / "history"), "rev-list", "--count", "HEAD"]).strip() == b"1"
@@ -181,7 +181,10 @@ with tempfile.TemporaryDirectory() as data:
         branch = subprocess.check_output(["git", "-C", str(history), "symbolic-ref", "--short", "HEAD"]).decode().strip()
         subprocess.run(["git", "init", "--bare", "--quiet", f"--initial-branch={branch}", str(remote)], check=True)
         send(b"r" + str(remote).encode() + b"\r")
-        assert subprocess.check_output(["git", "-C", str(history), "remote", "get-url", "origin"]).decode().strip() == str(remote)
+        deadline = time.monotonic() + 5
+        while subprocess.run(["git", "-C", str(history), "remote", "get-url", "origin"], capture_output=True).stdout.decode().strip() != str(remote):
+            assert time.monotonic() < deadline, "origin was not saved"
+            screen()
         send(b"P")
         deadline = time.monotonic() + 5
         head = subprocess.check_output(["git", "-C", str(history), "rev-parse", "HEAD"]).strip()
@@ -205,7 +208,7 @@ with tempfile.TemporaryDirectory() as data:
         wait_for_output(screen, b"second checkpoint", initial=send(b"3"))
         send(b"1\r ")
         send(b"2aClear me\r\raproject to clear\r")
-        assert b"remote settings?" in send(b"D")
+        wait_for_output(screen, b"remote settings?", initial=send(b"D"))
         send(b"\x1b")
         assert len(rows()) == 2
         send(b"Dyn")
