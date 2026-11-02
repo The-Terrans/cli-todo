@@ -124,11 +124,13 @@ fn task_views_drill_down_add_children_edit_and_complete_without_popups() -> Resu
         "r sorts instead of editing"
     );
     app.handle_key(KeyCode::Esc)?;
+    app.handle_key(KeyCode::Left)?;
     app.handle_key(KeyCode::Char('e'))?;
     assert!(matches!(app.mode, Mode::Edit(Some(id), _) if id == parent));
     app.handle_key(KeyCode::Char('!'))?;
     app.handle_key(KeyCode::Enter)?;
     assert_eq!(app.task_view.as_ref().unwrap().task.title, "parent!");
+    app.handle_key(KeyCode::Right)?;
     app.handle_key(KeyCode::Char('x'))?;
     assert!(app.task_view.as_ref().unwrap().task.done);
     app.handle_key(KeyCode::Char('x'))?;
@@ -522,6 +524,34 @@ fn deleting_highlighted_subtasks_preserves_parent_siblings_and_focus() -> Result
     app.handle_key(KeyCode::Char('d'))?;
     assert!(matches!(app.mode, Mode::Delete(id) if id == parent));
     app.handle_key(KeyCode::Esc)?;
+    Ok(())
+}
+
+#[test]
+fn e_edits_the_highlighted_subtask_and_returns_to_the_parent() -> Result<()> {
+    let mut app = app()?;
+    create_task(&mut app, "parent")?;
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Enter)?;
+    create_task(&mut app, "first")?;
+    create_task(&mut app, "second")?;
+    let parent = app.task_view.as_ref().unwrap().task.id;
+    app.handle_key(KeyCode::Right)?;
+    app.handle_key(KeyCode::Down)?;
+    let second = app.task_view.as_ref().unwrap().children[1].id;
+    app.handle_key(KeyCode::Char('e'))?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(Some(id), draft) if *id == second && draft.title == "second")
+    );
+    app.handle_key(KeyCode::Char('!'))?;
+    app.handle_key(KeyCode::Enter)?;
+    let view = app.task_view.as_ref().unwrap();
+    assert_eq!(view.task.id, parent);
+    assert_eq!(view.focus, TaskPane::Subtasks);
+    assert_eq!(view.children[1].title, "second!");
+    app.handle_key(KeyCode::Left)?;
+    app.handle_key(KeyCode::Char('e'))?;
+    assert!(matches!(app.mode, Mode::Edit(Some(id), _) if id == parent));
     Ok(())
 }
 
