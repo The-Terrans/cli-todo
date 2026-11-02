@@ -133,12 +133,9 @@ fn parse_task(text: &str, previous: &TaskDraft) -> Result<TaskDraft> {
     let (title, rest) = text
         .split_once('\n')
         .ok_or("Expected Title and Due date headers followed by a blank line")?;
-    let (due_date, rest) = rest
-        .split_once('\n')
-        .ok_or("Expected a Due date header followed by a blank line")?;
-    let (separator, description) = rest
-        .split_once('\n')
-        .ok_or("Expected a blank line before Description")?;
+    // Formatters often trim the trailing blank line (and final newline) when Description is empty.
+    let (due_date, rest) = rest.split_once('\n').unwrap_or((rest, ""));
+    let (separator, description) = rest.split_once('\n').unwrap_or((rest, ""));
     if !separator.trim_end_matches('\r').is_empty() {
         return Err("Expected a blank line before Description".into());
     }
