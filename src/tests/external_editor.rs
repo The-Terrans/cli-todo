@@ -122,9 +122,17 @@ fn file_format_preserves_description_whitespace_and_task_structure() -> Result<(
         placeholder.due_date.is_empty(),
         "unchanged placeholder must clear any previous date"
     );
-    assert!(parse_task("Title: blank body\nDue date:\n\n", &previous)?
-        .description
-        .is_empty());
+    // Formatters may trim the blank line and final newline when Description is empty.
+    for trimmed in [
+        "Title: blank body\nDue date:\n\n",
+        "Title: blank body\nDue date: YYYY-MM-DD\n",
+        "Title: blank body\r\nDue date:\r\n",
+        "Title: blank body\nDue date: 2028-02-29",
+    ] {
+        let imported = parse_task(trimmed, &previous)?;
+        assert_eq!(imported.title, "blank body", "{trimmed:?}");
+        assert!(imported.description.is_empty(), "{trimmed:?}");
+    }
     for invalid in [
         "",
         "Title: task",
@@ -134,7 +142,7 @@ fn file_format_preserves_description_whitespace_and_task_structure() -> Result<(
         "Title: task\nDue date: 2026-02-30\n\n",
         "Title: task\nDue date: YYYY-01-DD\n\n",
         "Title: task\nDue date:\nnot blank\nbody",
-        "Title: task\nDue date:\n",
+        "Title: task\nDue date:\nnot blank",
     ] {
         assert!(
             parse_task(invalid, &previous).is_err(),
