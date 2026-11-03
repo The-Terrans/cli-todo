@@ -240,7 +240,7 @@ fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
     let due = parse_due_date("2026-08-14")?;
     let overdue = task_title_line("dated", false, 2, due, Style::default(), today);
     assert_eq!(overdue.spans[0].content, "[ ] dated (2 subtasks)");
-    assert_eq!(overdue.spans[1].content, " [due: 2026-08-14]");
+    assert_eq!(overdue.spans[1].content, " [due: 2026-08-14 Yesterday]");
     assert_eq!(overdue.spans[1].style.fg, Some(Color::LightRed));
     let selected = task_title_line("dated", false, 0, due, task_selection_style(), today);
     assert_eq!(selected.spans[1].style.fg, Some(Color::LightRed));
@@ -248,6 +248,22 @@ fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
     assert_eq!(completed.spans[1].style.fg, Some(Color::DarkGray));
     let due_today = task_title_line("dated", false, 0, Some(today), Style::default(), today);
     assert_eq!(due_today.spans[1].style.fg, Some(Color::Gray));
+    assert_eq!(due_today.spans[1].content, " [due: 2026-08-15 Today]");
+    for (due, badge) in [
+        ("2026-08-16", " [due: 2026-08-16 Tomorrow]"),
+        ("2026-08-17", " [due: 2026-08-17]"),
+        ("2026-08-13", " [due: 2026-08-13]"),
+    ] {
+        let line = task_title_line(
+            "dated",
+            false,
+            0,
+            parse_due_date(due)?,
+            Style::default(),
+            today,
+        );
+        assert_eq!(line.spans[1].content, badge);
+    }
     assert_eq!(
         task_title_line("undated", false, 0, None, Style::default(), today)
             .spans

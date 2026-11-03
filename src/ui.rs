@@ -824,7 +824,13 @@ fn task_title_line(
         if done {
             badge = badge.add_modifier(Modifier::DIM);
         }
-        spans.push(Span::styled(format!(" [due: {date}]"), badge));
+        let relative = match (date - today).num_days() {
+            -1 => " Yesterday",
+            0 => " Today",
+            1 => " Tomorrow",
+            _ => "",
+        };
+        spans.push(Span::styled(format!(" [due: {date}{relative}]"), badge));
     }
     Line::from(spans).style(style)
 }
