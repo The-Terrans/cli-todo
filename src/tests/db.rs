@@ -433,6 +433,25 @@ fn filters_match_task_completion() -> Result<()> {
 }
 
 #[test]
+fn deleting_completed_tasks_removes_done_roots_with_descendants_only() -> Result<()> {
+    let db = open(Path::new(":memory:"))?;
+    save_task_tree(&db, None, &nested_draft(), None)?;
+    save_task_tree(&db, None, &nested_draft(), None)?;
+    let tasks = list_tasks(&db, Filter::All)?;
+    toggle_task(&db, tasks[0].id)?;
+    toggle_task(&db, tasks[5].id)?;
+    delete_completed_tasks(&db)?;
+    let remaining = list_tasks(&db, Filter::All)?;
+    assert_eq!(
+        remaining.iter().map(|task| task.id).collect::<Vec<_>>(),
+        tasks[4..].iter().map(|task| task.id).collect::<Vec<_>>(),
+        "pending roots keep their completed subtasks"
+    );
+    assert!(remaining[1].done);
+    Ok(())
+}
+
+#[test]
 fn completion_time_is_stamped_kept_for_done_descendants_and_cleared_on_reopen() -> Result<()> {
     let db = open(Path::new(":memory:"))?;
     let done_child = SubtaskDraft {

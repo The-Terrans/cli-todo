@@ -598,6 +598,12 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
             "Permanently delete this task and its descendants?\nEnter: confirm · Esc: cancel"
                 .into(),
         ),
+        Mode::DeleteCompleted(count) => (
+            " Delete all completed tasks? ",
+            format!(
+                "Permanently delete {count} completed tasks and their subtasks?\nEnter: confirm · Esc: cancel"
+            ),
+        ),
     };
     let area = dialog_area(frame.area(), 6);
     frame.render_widget(Clear, area);

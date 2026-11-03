@@ -1755,6 +1755,46 @@ fn deletion_requires_confirmation() -> Result<()> {
 }
 
 #[test]
+fn d_on_inbox_completed_filter_deletes_all_completed_tasks_after_confirmation() -> Result<()> {
+    let mut app = app()?;
+    db::save_project(&app.db, None, "Work")?;
+    let project = app.db.last_insert_rowid();
+    for (title, project) in [
+        ("done", None),
+        ("done in project", Some(project)),
+        ("pending", None),
+    ] {
+        db::create_task(&app.db, title, project)?;
+    }
+    let tasks = db::list_tasks(&app.db, Filter::All)?;
+    db::toggle_task(&app.db, tasks[0].id)?;
+    db::toggle_task(&app.db, tasks[1].id)?;
+    app.refresh_tasks()?;
+    app.handle_key(KeyCode::Char('d'))?;
+    assert!(matches!(app.mode, Mode::Browse), "other filters ignore d");
+    keys(&mut app, &[KeyCode::Down, KeyCode::Down])?;
+    app.handle_key(KeyCode::Char('d'))?;
+    assert!(matches!(app.mode, Mode::DeleteCompleted(2)));
+    for ignored in ['y', 'n', 'q'] {
+        assert!(!app.handle_key(KeyCode::Char(ignored))?);
+        assert!(matches!(app.mode, Mode::DeleteCompleted(2)));
+    }
+    app.handle_key(KeyCode::Esc)?;
+    assert!(matches!(app.mode, Mode::Browse));
+    assert_eq!(db::list_tasks(&app.db, Filter::All)?.len(), 3);
+    keys(&mut app, &[KeyCode::Char('d'), KeyCode::Enter])?;
+    assert!(matches!(app.mode, Mode::Browse));
+    assert!(app.tasks.is_empty());
+    let remaining = db::list_tasks(&app.db, Filter::All)?;
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].title, "pending");
+    app.handle_key(KeyCode::Char('d'))?;
+    assert!(matches!(app.mode, Mode::Browse));
+    assert_eq!(app.message, "No completed tasks to delete");
+    Ok(())
+}
+
+#[test]
 fn alt_j_and_k_reorder_tasks_and_focused_subtasks() -> Result<()> {
     let mut app = app()?;
     let child = |title: &str| SubtaskDraft {
