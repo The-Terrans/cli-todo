@@ -240,6 +240,16 @@ impl App {
             .or_else(|| self.tasks.get(self.selected_task).map(|task| task.id))
     }
 
+    /// The focused subtask when Subtasks is focused, otherwise the current task.
+    fn hovered_task_id(&self) -> Option<i64> {
+        match self.task_view.as_ref().filter(|_| !self.navigation_focused) {
+            Some(view) if view.focus == TaskPane::Subtasks => {
+                view.children.get(view.selected_child).map(|child| child.id)
+            }
+            _ => self.current_task_id(),
+        }
+    }
+
     fn handle_opened_task_key(&mut self, key: KeyCode) -> Result<()> {
         let Some(view) = &mut self.task_view else {
             return Ok(());
@@ -1026,19 +1036,13 @@ impl App {
                 );
             }
             Action::Edit => {
-                if let Some(id) = self.current_task_id() {
+                if let Some(id) = self.hovered_task_id() {
                     self.new_task_parent = None;
                     self.mode = Mode::Edit(Some(id), db::task_draft(&self.db, id)?);
                 }
             }
             Action::Delete => {
-                let id = match self.task_view.as_ref().filter(|_| !self.navigation_focused) {
-                    Some(view) if view.focus == TaskPane::Subtasks => {
-                        view.children.get(view.selected_child).map(|child| child.id)
-                    }
-                    _ => self.current_task_id(),
-                };
-                if let Some(id) = id {
+                if let Some(id) = self.hovered_task_id() {
                     self.mode = Mode::Delete(id);
                 }
             }

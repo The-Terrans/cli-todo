@@ -79,7 +79,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Up / Down     Scroll details or select a focused child",
     "  Enter         Open selected child when Subtasks is focused",
     "  Alt+J / Alt+K Move pending child down/up in Manual order (Alt+Down/Up)",
-    "  Enter / e     Edit when Details is focused; e works in either pane",
+    "  Enter / e     Edit when Details is focused; e edits selected child in Subtasks",
     "  x             Toggle opened task; completing cascades",
     "  d             Delete opened task and descendants with confirmation",
     "  Save / Esc    Save/cancel the current popup; return to task details",

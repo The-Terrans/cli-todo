@@ -33,7 +33,7 @@ fn e_edits_tasks_and_subtasks_while_remote_r_and_project_e_stay_unchanged() -> R
             "r sorts tasks instead of editing them"
         );
         app.handle_key(KeyCode::Esc)?;
-        let title = if step == 3 { "child" } else { "parent" };
+        let title = if step >= 2 { "child" } else { "parent" };
         app.handle_key(KeyCode::Char('e'))?;
         assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.title == title));
         keys(&mut app, &[KeyCode::Char('e'), KeyCode::Char('r')])?;

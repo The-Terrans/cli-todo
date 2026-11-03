@@ -140,7 +140,7 @@ Press **Enter** on a task to replace the right-hand list with its title, descrip
 
 1. Details are focused first. **Left/Right** cycles Details ↔ Subtasks when children exist, like the sidebar. **Tab/Shift+Tab** switches between the whole left and right panels, preserving the opened task, selected child, scroll position, and Details/Subtasks focus. In Subtasks, **Up/Down** selects a child and **Enter** opens its details.
 2. **a** opens a creation form for a child of the opened task. Saving returns to the parent view; Esc cancels.
-3. **Enter** while Details is focused opens the same three-field edit popup as **e**. In Subtasks, Enter still opens the selected child's details. **x** toggles that task between completed and pending. Completing also completes every descendant; reopening leaves descendants unchanged.
+3. **Enter** while Details is focused opens the same three-field edit popup as **e**. In Subtasks, Enter still opens the selected child's details and **e** edits the selected child. **x** toggles that task between completed and pending. Completing also completes every descendant; reopening leaves descendants unchanged.
 4. **PageUp/PageDown** scroll Description; **Home/End** jump. Up/Down scroll Description while Details is focused. Title and date remain visible.
 5. **Esc** returns to the parent, then the main task list, then the sidebar. Space toggles the selected child in Subtasks, or the opened task in Details.
 
