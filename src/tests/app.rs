@@ -431,6 +431,52 @@ fn shift_e_requests_external_edit_only_for_a_hovered_task() -> Result<()> {
 }
 
 #[test]
+fn shift_c_copies_the_hovered_task_title_and_description() -> Result<()> {
+    let mut app = app()?;
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Char('C'))?;
+    assert_eq!(app.clipboard_request, None);
+    db::save_task_tree(
+        &app.db,
+        None,
+        &TaskDraft {
+            title: "parent".into(),
+            description: "details".into(),
+            subtasks: vec![SubtaskDraft {
+                id: None,
+                done: false,
+                draft: TaskDraft {
+                    title: "child".into(),
+                    ..TaskDraft::default()
+                },
+            }],
+            ..TaskDraft::default()
+        },
+        None,
+    )?;
+    app.refresh_tasks()?;
+    app.handle_key(KeyCode::Char('1'))?;
+    app.handle_key(KeyCode::Char('C'))?;
+    assert_eq!(app.clipboard_request, None);
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::SHIFT))?;
+    assert_eq!(
+        app.clipboard_request.take().as_deref(),
+        Some("parent\n\ndetails")
+    );
+    assert_eq!(app.message, "Copied task to clipboard");
+    // An opened task copies itself from Details and the highlighted child from Subtasks.
+    keys(&mut app, &[KeyCode::Enter, KeyCode::Char('C')])?;
+    assert_eq!(
+        app.clipboard_request.take().as_deref(),
+        Some("parent\n\ndetails")
+    );
+    keys(&mut app, &[KeyCode::Right, KeyCode::Char('C')])?;
+    assert_eq!(app.clipboard_request.as_deref(), Some("child"));
+    Ok(())
+}
+
+#[test]
 fn task_details_scroll_clamps_and_delete_returns_to_parent() -> Result<()> {
     let mut app = app()?;
     db::save_task_tree(

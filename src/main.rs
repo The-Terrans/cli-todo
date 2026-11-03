@@ -1,4 +1,5 @@
 mod app;
+mod clipboard;
 mod constants;
 mod dates;
 mod db;
@@ -129,6 +130,9 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                 {
                     // Shift+E saves straight away; failures leave the popup open to fix or Esc.
                     app.save_task_edit()?;
+                }
+                if let Some(text) = app.clipboard_request.take() {
+                    clipboard::copy(&text)?;
                 }
             }
             Event::Resize(width, height) => {

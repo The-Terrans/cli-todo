@@ -49,6 +49,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Alt+Down/Up   Same as Alt+J / Alt+K",
     "  Shift+D       Nuke all data, local commits and remote settings",
     "  Shift+E       Edit hovered task in VISUAL/EDITOR; saves on exit",
+    "  Shift+C       Copy hovered task title and description (OSC 52)",
     "",
     "COMMITS (LEFT PANEL)",
     "  r             Set/change/remove origin",

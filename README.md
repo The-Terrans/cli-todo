@@ -104,6 +104,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | a                            | Add task; add child inside an opened task; add project in Projects |
 | e in Tasks                   | Edit task in a Title / Description / Due date popup       |
 | Shift+E in Tasks             | Edit selected (or opened) task in an external editor; saves on exit |
+| Shift+C in Tasks             | Copy hovered task's (or highlighted subtask's) title, a blank line, then its description to the clipboard via OSC 52 (terminal must support it; tmux needs `set-clipboard on`) |
 | e in Projects                | Rename project                                           |
 | Space                        | Toggle selected row (opened leaf: toggle that task)       |
 | x                            | Toggle opened/selected task between completed and pending |

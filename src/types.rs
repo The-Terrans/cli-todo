@@ -206,5 +206,7 @@ pub struct App {
     pub mode: Mode,
     /// Set by Shift+E once the hovered task's popup is open; the event loop launches the editor.
     pub(crate) external_edit_requested: bool,
+    /// Set by Shift+C with the hovered task's text; the event loop sends it to the clipboard.
+    pub(crate) clipboard_request: Option<String>,
     pub message: String,
 }
