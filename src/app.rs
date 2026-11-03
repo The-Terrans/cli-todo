@@ -44,6 +44,7 @@ impl App {
             inbox_state: None,
             mode: Mode::Browse,
             external_edit_requested: false,
+            clipboard_request: None,
             message: String::new(),
             db,
         };
@@ -232,22 +233,43 @@ impl App {
         Ok(())
     }
 
-    fn current_task_id(&self) -> Option<i64> {
+    fn current_task(&self) -> Option<&Task> {
         self.task_view
             .as_ref()
             .filter(|_| !self.navigation_focused)
-            .map(|view| view.task.id)
-            .or_else(|| self.tasks.get(self.selected_task).map(|task| task.id))
+            .map(|view| &view.task)
+            .or_else(|| self.tasks.get(self.selected_task))
+    }
+
+    fn current_task_id(&self) -> Option<i64> {
+        self.current_task().map(|task| task.id)
+    }
+
+    /// Queues the hovered task's title and description for the event loop to copy.
+    fn request_copy(&mut self) {
+        let Some(task) = self.hovered_task() else {
+            return;
+        };
+        self.clipboard_request = Some(if task.description.is_empty() {
+            task.title.clone()
+        } else {
+            format!("{}\n\n{}", task.title, task.description)
+        });
+        self.message = "Copied task to clipboard".into();
     }
 
     /// The focused subtask when Subtasks is focused, otherwise the current task.
-    fn hovered_task_id(&self) -> Option<i64> {
+    fn hovered_task(&self) -> Option<&Task> {
         match self.task_view.as_ref().filter(|_| !self.navigation_focused) {
             Some(view) if view.focus == TaskPane::Subtasks => {
-                view.children.get(view.selected_child).map(|child| child.id)
+                view.children.get(view.selected_child)
             }
-            _ => self.current_task_id(),
+            _ => self.current_task(),
         }
+    }
+
+    fn hovered_task_id(&self) -> Option<i64> {
+        self.hovered_task().map(|task| task.id)
     }
 
     fn handle_opened_task_key(&mut self, key: KeyCode) -> Result<()> {
@@ -302,6 +324,7 @@ impl App {
                 self.execute_action(Action::Edit)?;
             }
             KeyCode::Char('E') => self.request_external_edit()?,
+            KeyCode::Char('C') => self.request_copy(),
             KeyCode::Char('d') => {
                 self.execute_action(Action::Delete)?;
             }
@@ -997,6 +1020,10 @@ impl App {
             }
             KeyCode::Char('e') => Action::Edit,
             KeyCode::Char('E') => return self.request_external_edit(),
+            KeyCode::Char('C') => {
+                self.request_copy();
+                return Ok(());
+            }
             KeyCode::Char('d') => Action::Delete,
             KeyCode::Char('m') => Action::Move,
             KeyCode::Char(' ') => Action::ToggleCompletion,
