@@ -41,7 +41,12 @@ pub fn date_phrases(text: &str, today: NaiveDate) -> Vec<DatePhrase> {
         }
     }
     let mut phrases = Vec::new();
+    // Words already inside a phrase can't start another, so `next fri` isn't also `fri`.
+    let mut free_from = 0;
     for index in 0..words.len() {
+        if index < free_from {
+            continue;
+        }
         let Some((date, count)) = date_words(&words[index..], today) else {
             continue;
         };
@@ -58,6 +63,7 @@ pub fn date_phrases(text: &str, today: NaiveDate) -> Vec<DatePhrase> {
         }
         let range = matched[0].0.start..matched[count - 1].0.end;
         phrases.push(DatePhrase { range, date });
+        free_from = index + count;
     }
     phrases
 }
@@ -75,20 +81,10 @@ fn date_words(words: &[(Range<usize>, &str)], today: NaiveDate) -> Option<(Naive
             let days = if second == "week" {
                 7
             } else {
-                let weekday = match second.as_str() {
-                    "mon" | "monday" => Weekday::Mon,
-                    "tue" | "tues" | "tuesday" => Weekday::Tue,
-                    "wed" | "wednesday" => Weekday::Wed,
-                    "thu" | "thur" | "thurs" | "thursday" => Weekday::Thu,
-                    "fri" | "friday" => Weekday::Fri,
-                    "sat" | "saturday" => Weekday::Sat,
-                    "sun" | "sunday" => Weekday::Sun,
-                    _ => return None,
-                };
-                let days = (weekday.num_days_from_monday() + 7
-                    - today.weekday().num_days_from_monday())
-                    % 7;
-                u64::from(if days == 0 { 7 } else { days })
+                match days_until(parse_weekday(&second)?, today) {
+                    0 => 7,
+                    days => days,
+                }
             };
             return Some((today.checked_add_days(Days::new(days))?, 2));
         }
@@ -103,6 +99,11 @@ fn date_words(words: &[(Range<usize>, &str)], today: NaiveDate) -> Option<(Naive
             return Some((today.checked_add_days(Days::new(days))?, 3));
         }
         _ => {}
+    }
+    // A bare weekday means its nearest occurrence, counting today.
+    if let Some(weekday) = parse_weekday(&first) {
+        let days = days_until(weekday, today);
+        return Some((today.checked_add_days(Days::new(days))?, 1));
     }
     if let Ok(Some(date)) = parse_due_date(&first) {
         return Some((date, 1));
@@ -142,6 +143,24 @@ fn date_words(words: &[(Range<usize>, &str)], today: NaiveDate) -> Option<(Naive
         return None;
     }
     Some((NaiveDate::from_ymd_opt(year.parse().ok()?, month, day)?, 3))
+}
+
+fn parse_weekday(word: &str) -> Option<Weekday> {
+    Some(match word {
+        "mon" | "monday" => Weekday::Mon,
+        "tue" | "tues" | "tuesday" => Weekday::Tue,
+        "wed" | "wednesday" => Weekday::Wed,
+        "thu" | "thur" | "thurs" | "thursday" => Weekday::Thu,
+        "fri" | "friday" => Weekday::Fri,
+        "sat" | "saturday" => Weekday::Sat,
+        "sun" | "sunday" => Weekday::Sun,
+        _ => return None,
+    })
+}
+
+/// Days from `today` to the next `weekday`, 0 when they match.
+fn days_until(weekday: Weekday, today: NaiveDate) -> u64 {
+    u64::from((weekday.num_days_from_monday() + 7 - today.weekday().num_days_from_monday()) % 7)
 }
 
 pub fn remove_date_phrase(text: &str, mut range: Range<usize>) -> String {
