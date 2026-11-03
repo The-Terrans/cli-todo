@@ -42,6 +42,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  PageUp/Down   Scroll opened task details (Home/End jump)",
     "  Space         Complete/reopen task (Tasks only)",
     "  d             Delete task/project with confirmation",
+    "  d             Delete all completed tasks (Inbox Completed)",
     "  m             Move task to a project or No project",
     "  f             Filter a project's tasks: Today/All/Pending/Completed",
     "  r             Sort pending tasks per project / Inbox filter; saved",

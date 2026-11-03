@@ -443,6 +443,7 @@ impl App {
             Mode::Help { .. } => self.handle_help_key(key),
             Mode::Edit(..) => self.handle_edit_key(key)?,
             Mode::Delete(id) => self.handle_delete_key(key, id)?,
+            Mode::DeleteCompleted(_) => self.handle_delete_completed_key(key)?,
             Mode::Nuke { .. } => self.handle_nuke_key(key)?,
             Mode::ResetHistory { .. } => self.handle_reset_history_key(key),
             Mode::Palette { .. } => return self.handle_palette_key(key),
@@ -936,6 +937,14 @@ impl App {
             KeyCode::Up => (self.selected_filter + FILTERS.len() - 1) % FILTERS.len(),
             KeyCode::Enter => {
                 self.navigation_focused = false;
+                return Ok(());
+            }
+            KeyCode::Char('d') if FILTERS[self.selected_filter].1 == Filter::Completed => {
+                if self.tasks.is_empty() {
+                    self.message = "No completed tasks to delete".into();
+                } else {
+                    self.mode = Mode::DeleteCompleted(self.tasks.len());
+                }
                 return Ok(());
             }
             _ => return Ok(()),
@@ -1573,6 +1582,19 @@ impl App {
         match key {
             KeyCode::Enter => {
                 db::delete_task(&self.db, id)?;
+                self.mode = Mode::Browse;
+                self.refresh_tasks()?;
+            }
+            KeyCode::Esc => self.mode = Mode::Browse,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_delete_completed_key(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Enter => {
+                db::delete_completed_tasks(&self.db)?;
                 self.mode = Mode::Browse;
                 self.refresh_tasks()?;
             }

@@ -499,6 +499,12 @@ pub fn delete_task(db: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Deletes completed top-level tasks with their descendants, matching Inbox's Completed list.
+pub fn delete_completed_tasks(db: &Connection) -> Result<()> {
+    db.execute("DELETE FROM tasks WHERE done AND parent_id IS NULL", [])?;
+    Ok(())
+}
+
 pub fn toggle_task(db: &Connection, id: i64) -> Result<()> {
     let transaction = db.unchecked_transaction()?;
     let done: bool =

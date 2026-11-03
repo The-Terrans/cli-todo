@@ -106,6 +106,8 @@ pub enum Mode {
     },
     Edit(Option<i64>, TaskDraft),
     Delete(i64),
+    /// Confirms deleting the given number of tasks listed in Inbox's Completed filter.
+    DeleteCompleted(usize),
     Nuke {
         tasks: usize,
         projects: usize,
