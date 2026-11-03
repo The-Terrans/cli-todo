@@ -347,7 +347,7 @@ impl App {
             return Ok(false);
         }
         if modifiers == KeyModifiers::CONTROL && matches!(key.code, KeyCode::Char('s' | 'S')) {
-            if matches!(&self.mode, Mode::Edit(_, draft) if draft.focus != TaskField::Title) {
+            if matches!(self.mode, Mode::Edit(..)) {
                 self.message.clear();
                 self.save_task_edit()?;
             }

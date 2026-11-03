@@ -65,7 +65,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Enter         Save title/text; run search result; choose destination",
     "  Enter         Insert newline when task Description is focused",
     "  Tab/Shift+Tab Cycle Title / Description / Due date",
-    "  Ctrl+S        Save from Description/Due date",
+    "  Ctrl+S        Save from any task field",
     "  Ctrl+G        Task popup: edit whole draft in VISUAL/EDITOR",
     "  Due date      Optional YYYY-MM-DD; blank clears the deadline",
     "  Up / Down     Choose search result, destination, filter or sort",

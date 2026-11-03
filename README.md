@@ -121,7 +121,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Esc in deletion dialog       | Cancel deletion                                          |
 | Enter in text entry          | Save title; in task Description, insert newline           |
 | Tab / Shift+Tab in editor    | Cycle Title / Description / Due date                      |
-| Ctrl+S outside Title         | Save the current task editor                              |
+| Ctrl+S in task editor        | Save the current task editor                              |
 | Ctrl+G in task editor        | Edit the whole draft in an external editor                |
 | Left / Right in editors      | Move the cursor; typing inserts at its position           |
 | Up / Down in Description     | Move between explicit newline-separated lines             |

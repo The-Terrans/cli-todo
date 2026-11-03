@@ -1140,13 +1140,21 @@ fn commit_marker_and_no_changes_notification_follow_database_changes() -> Result
 }
 
 #[test]
-fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
+fn ctrl_s_saves_task_from_title() -> Result<()> {
     let mut app = app()?;
     app.handle_key(KeyCode::Char('a'))?;
     app.handle_key(KeyCode::Char('t'))?;
     app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))?;
-    assert!(matches!(app.mode, Mode::Edit(..)));
-    assert!(db::list_tasks(&app.db, Filter::All)?.is_empty());
+    assert!(matches!(app.mode, Mode::Browse));
+    assert_eq!(app.tasks[0].title, "t");
+    Ok(())
+}
+
+#[test]
+fn task_editor_toggles_fields_and_saves_multiline_descriptions() -> Result<()> {
+    let mut app = app()?;
+    app.handle_key(KeyCode::Char('a'))?;
+    app.handle_key(KeyCode::Char('t'))?;
     app.handle_key(KeyCode::Tab)?;
     app.handle_key(KeyCode::Char('界'))?;
     app.handle_key(KeyCode::Enter)?;
