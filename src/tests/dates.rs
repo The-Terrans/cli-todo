@@ -22,6 +22,10 @@ fn date_phrases_are_extracted_and_removed_with_calendar_safe_relative_dates() {
         ("do chores 29-02-2028.", "do chores.", "2028-02-29"),
         ("do chores next Monday", "do chores", "2026-08-17"),
         ("do chores next sat", "do chores", "2026-08-22"),
+        ("do chores saturday", "do chores", "2026-08-15"),
+        ("do chores sun", "do chores", "2026-08-16"),
+        ("do chores Monday", "do chores", "2026-08-17"),
+        ("do chores fri", "do chores", "2026-08-21"),
         ("do chores in 3 days", "do chores", "2026-08-18"),
         ("do chores in 2 weeks", "do chores", "2026-08-29"),
         ("do chores 12 oct 2026", "do chores", "2026-10-12"),
@@ -69,6 +73,7 @@ fn date_matching_ignores_invalid_dates_partial_words_urls_and_overflow() {
     for text in [
         "tomatoes",
         "todayish",
+        "fridays",
         "tomorrow's plan",
         "31 feb 2026",
         "2026-02-30",
@@ -97,6 +102,7 @@ fn date_matching_ignores_invalid_dates_partial_words_urls_and_overflow() {
         extract_date_phrase("today then tomorrow", today).unwrap(),
         ("then tomorrow".into(), today)
     );
+    assert_eq!(date_phrases("finish next fri", today).len(), 1);
 }
 
 #[test]
