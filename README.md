@@ -106,6 +106,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Shift+E in Tasks             | Edit selected (or opened) task in an external editor; saves on exit |
 | Shift+C in Tasks             | Copy hovered task's (or highlighted subtask's) title, a blank line, then its description to the clipboard via OSC 52 (terminal must support it; tmux needs `set-clipboard on`) |
 | e in Projects                | Rename project                                           |
+| Alt+J / Alt+K (or Alt+Down / Alt+Up) in Projects | Move selected project down/up; order is saved |
 | Space                        | Toggle selected row (opened leaf: toggle that task)       |
 | x                            | Toggle opened/selected task between completed and pending |
 | d                            | Request task/project deletion in its section              |
@@ -212,7 +213,7 @@ Only top-level tasks appear in Inbox/project lists; manage children in the right
 
 ## Projects
 
-The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to create a project. Use arrows to select a project: its tasks preview immediately on the right. **Enter** focuses those tasks. The focused panel has a bold bright-yellow border and a black-on-yellow title, even when its list is empty. Only its row cursor is highlighted; inactive panels have dark-gray borders and no highlighted cursor. **e** renames it. Names must be nonblank and unique.
+The compact **[2] Projects** box appears below Inbox. Press **2**, then **a** to create a project. Use arrows to select a project: its tasks preview immediately on the right. **Enter** focuses those tasks. The focused panel has a bold bright-yellow border and a black-on-yellow title, even when its list is empty. Only its row cursor is highlighted; inactive panels have dark-gray borders and no highlighted cursor. **e** renames it. **Alt+J/Alt+K** (or Alt+Down/Alt+Up) moves the selected project down/up; the order is saved, new projects start at the bottom, and the Move popup and search list projects in the same order. Names must be nonblank and unique.
 
 New tasks belong to the open project; tasks added from Inbox have no project. In Tasks, press **m** (or search Move via Ctrl+K) to move a task to a project or to **No project**. Alt+J/Alt+K in Inbox reorders the shared list; a project's own order changes only if the active filter hides its tasks between the swapped pair. **Esc** returns through any opened task ancestry to the main list, then to its navigation section. Tab/Shift+Tab switches left/right panel focus throughout browsing, including main lists, opened tasks, and Commits. Switching back resumes the same position unless sidebar navigation changes the displayed content. Inside task popups, Tab/Shift+Tab still cycles editor fields.
 

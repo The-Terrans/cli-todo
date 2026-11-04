@@ -1926,6 +1926,60 @@ fn completed_subtasks_sort_below_pending_ones_and_keep_their_place() -> Result<(
 }
 
 #[test]
+fn alt_j_and_k_reorder_projects_in_the_projects_panel() -> Result<()> {
+    let mut app = app()?;
+    for name in ["A", "B", "C"] {
+        db::save_project(&app.db, None, name)?;
+    }
+    app.refresh_projects()?;
+    let alt = |app: &mut App, character| {
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(character), KeyModifiers::ALT))
+    };
+    let names = |app: &App| -> Vec<String> {
+        app.projects
+            .iter()
+            .map(|project| project.name.clone())
+            .collect()
+    };
+    app.handle_key(KeyCode::Char('1'))?;
+    alt(&mut app, 'j')?;
+    assert_eq!(names(&app), ["A", "B", "C"]);
+    app.handle_key(KeyCode::Char('2'))?;
+    let first = app.projects[0].id;
+    assert_eq!(app.current_project, Some(first));
+    alt(&mut app, 'k')?;
+    assert_eq!(names(&app), ["A", "B", "C"]);
+    alt(&mut app, 'j')?;
+    alt(&mut app, 'j')?;
+    assert_eq!(names(&app), ["B", "C", "A"]);
+    assert_eq!(app.selected_project, 2);
+    assert_eq!(app.current_project, Some(first));
+    alt(&mut app, 'j')?;
+    assert_eq!(app.selected_project, 2);
+    alt(&mut app, 'k')?;
+    assert_eq!(names(&app), ["B", "A", "C"]);
+    assert_eq!(app.selected_project, 1);
+    assert!(app.uncommitted_changes);
+    let saved: Vec<String> = db::list_projects(&app.db)?
+        .into_iter()
+        .map(|project| project.name)
+        .collect();
+    assert_eq!(saved, ["B", "A", "C"]);
+    let alt_arrow =
+        |app: &mut App, key| app.handle_key_event(KeyEvent::new(key, KeyModifiers::ALT));
+    alt_arrow(&mut app, KeyCode::Up)?;
+    assert_eq!(names(&app), ["A", "B", "C"]);
+    assert_eq!(app.selected_project, 0);
+    alt_arrow(&mut app, KeyCode::Down)?;
+    assert_eq!(names(&app), ["B", "A", "C"]);
+    assert_eq!(app.selected_project, 1);
+    app.handle_key(KeyCode::Enter)?;
+    alt(&mut app, 'j')?;
+    assert_eq!(names(&app), ["B", "A", "C"]);
+    Ok(())
+}
+
+#[test]
 fn subtasks_follow_the_shown_lists_sort_and_reorder_only_in_manual_order() -> Result<()> {
     let mut app = app()?;
     create_task(&mut app, "parent")?;

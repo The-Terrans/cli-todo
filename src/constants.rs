@@ -38,6 +38,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  a             Add task; add child when a task is open",
     "  e             Edit task: Title / Description / Due date",
     "  e             Rename project in Projects",
+    "  Alt+J / Alt+K Move selected project down/up in Projects (Alt+Down/Up)",
     "  x             Toggle opened/selected task completed/pending",
     "  PageUp/Down   Scroll opened task details (Home/End jump)",
     "  Space         Complete/reopen task (Tasks only)",
