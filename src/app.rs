@@ -379,10 +379,17 @@ impl App {
         self.handle_key(key.code)
     }
 
-    /// Swaps the selected task or focused subtask with its visible neighbour.
+    /// Swaps the selected project, task or focused subtask with its visible neighbour.
     fn reorder_selected(&mut self, down: bool) -> Result<()> {
-        if !matches!(self.mode, Mode::Browse) || self.navigation_focused || self.commits_focused {
+        if !matches!(self.mode, Mode::Browse) || self.commits_focused {
             return Ok(());
+        }
+        if self.navigation_focused {
+            return if self.projects_focused {
+                self.reorder_selected_project(down)
+            } else {
+                Ok(())
+            };
         }
         let (tasks, selected) = match &self.task_view {
             Some(view) if view.focus != TaskPane::Subtasks => return Ok(()),
@@ -413,6 +420,27 @@ impl App {
             None => self.selected_task = target,
         }
         self.refresh_tasks()
+    }
+
+    fn reorder_selected_project(&mut self, down: bool) -> Result<()> {
+        let selected = self.selected_project;
+        let Some(target) = (if down {
+            selected.checked_add(1)
+        } else {
+            selected.checked_sub(1)
+        }) else {
+            return Ok(());
+        };
+        let (Some(project), Some(neighbour)) =
+            (self.projects.get(selected), self.projects.get(target))
+        else {
+            return Ok(());
+        };
+        db::swap_projects(&self.db, project.id, neighbour.id)?;
+        // The previewed project and its filter stay unchanged; only the list order moves.
+        self.projects = db::list_projects(&self.db)?;
+        self.selected_project = target;
+        Ok(())
     }
 
     fn handle_key(&mut self, key: KeyCode) -> Result<bool> {

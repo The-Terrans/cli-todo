@@ -687,6 +687,36 @@ fn positions_migrate_in_creation_order_swap_and_append_new_tasks() -> Result<()>
 }
 
 #[test]
+fn project_positions_migrate_in_creation_order_swap_and_append_new_projects() -> Result<()> {
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let path = env::temp_dir().join(format!("cli-todo-project-position-{stamp}.sqlite3"));
+    let legacy = Connection::open(&path)?;
+    legacy.execute_batch("CREATE TABLE projects(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE); INSERT INTO projects(name) VALUES ('first'),('second');")?;
+    assert_eq!(list_projects(&legacy)?[0].name, "first");
+    drop(legacy);
+    let names = |db: &Connection| -> Result<Vec<String>> {
+        Ok(list_projects(db)?
+            .into_iter()
+            .map(|project| project.name)
+            .collect())
+    };
+    let db = open(&path)?;
+    assert_eq!(names(&db)?, ["first", "second"]);
+    swap_projects(&db, 1, 2)?;
+    save_project(&db, None, "third")?;
+    save_project(&db, Some(1), "renamed")?;
+    assert_eq!(names(&db)?, ["second", "renamed", "third"]);
+    drop(db);
+    let db = open(&path)?;
+    assert_eq!(names(&db)?, ["second", "renamed", "third"]);
+    drop(db);
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn today_roots_include_overdue_and_parents_of_due_subtasks() -> Result<()> {
     let today = parse_due_date("2026-10-22")?.unwrap();
     let task = |id, parent_id, done, due: &str| -> Result<Task> {

@@ -43,14 +43,19 @@ pub fn open(path: &Path) -> Result<Connection> {
     migrate_positions(&db)?;
     migrate_completed_at(&db)?;
     migrate_sorts(&db)?;
+    migrate_project_positions(&db)?;
     validate_hierarchy(&db)?;
     Ok(db)
 }
 
 fn has_column(db: &Connection, column: &str) -> Result<bool> {
+    table_has_column(db, "tasks", column)
+}
+
+fn table_has_column(db: &Connection, table: &str, column: &str) -> Result<bool> {
     Ok(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name=?1)",
-        [column],
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",
+        [table, column],
         |row| row.get(0),
     )?)
 }
@@ -83,6 +88,15 @@ pub fn migrate_positions(db: &Connection) -> Result<()> {
     }
     // Existing tasks keep their creation order.
     db.execute_batch("UPDATE tasks SET position=id WHERE position IS NULL;")?;
+    Ok(())
+}
+
+/// Existing projects keep their creation order.
+pub fn migrate_project_positions(db: &Connection) -> Result<()> {
+    if !table_has_column(db, "projects", "position")? {
+        db.execute_batch("ALTER TABLE projects ADD COLUMN position INTEGER;")?;
+    }
+    db.execute_batch("UPDATE projects SET position=id WHERE position IS NULL;")?;
     Ok(())
 }
 
@@ -162,18 +176,27 @@ pub fn save_sort(db: &Connection, project: Option<i64>, filter: Filter, sort: So
 }
 
 pub fn swap_tasks(db: &Connection, first: i64, second: i64) -> Result<()> {
+    swap_positions(db, "tasks", first, second)
+}
+
+pub fn swap_projects(db: &Connection, first: i64, second: i64) -> Result<()> {
+    swap_positions(db, "projects", first, second)
+}
+
+/// `table` must be a trusted table name with `id` and `position` columns.
+fn swap_positions(db: &Connection, table: &str, first: i64, second: i64) -> Result<()> {
     let transaction = db.unchecked_transaction()?;
     let position = |id: i64| -> Result<i64> {
-        Ok(
-            transaction.query_row("SELECT position FROM tasks WHERE id=?1", [id], |row| {
-                row.get(0)
-            })?,
-        )
+        Ok(transaction.query_row(
+            &format!("SELECT position FROM {table} WHERE id=?1"),
+            [id],
+            |row| row.get(0),
+        )?)
     };
     let (first_position, second_position) = (position(first)?, position(second)?);
     for (id, position) in [(first, second_position), (second, first_position)] {
         transaction.execute(
-            "UPDATE tasks SET position=?1 WHERE id=?2",
+            &format!("UPDATE {table} SET position=?1 WHERE id=?2"),
             params![position, id],
         )?;
     }
@@ -628,7 +651,15 @@ pub fn move_task(db: &Connection, id: i64, project: Option<i64>) -> Result<()> {
 }
 
 pub fn list_projects(db: &Connection) -> Result<Vec<Project>> {
-    let mut statement = db.prepare("SELECT id,name FROM projects ORDER BY id")?;
+    // Old Git snapshots predate project positions and remain readable without migration.
+    let position = if table_has_column(db, "projects", "position")? {
+        "position"
+    } else {
+        "id"
+    };
+    let mut statement = db.prepare(&format!(
+        "SELECT id,name FROM projects ORDER BY {position},id"
+    ))?;
     let rows = statement.query_map([], |row| {
         Ok(Project {
             id: row.get(0)?,
@@ -646,7 +677,11 @@ pub fn save_project(db: &Connection, id: Option<i64>, name: &str) -> Result<()> 
     if let Some(id) = id {
         db.execute("UPDATE projects SET name=?1 WHERE id=?2", params![name, id])?;
     } else {
-        db.execute("INSERT INTO projects(name) VALUES (?1)", [name])?;
+        db.execute(
+            "INSERT INTO projects(name,position)
+             VALUES (?1,(SELECT COALESCE(MAX(position),0)+1 FROM projects))",
+            [name],
+        )?;
     }
     Ok(())
 }
