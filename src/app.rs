@@ -414,6 +414,11 @@ impl App {
             self.message = "Completed tasks stay ordered by completion date".into();
             return Ok(());
         }
+        // Today mixes levels; swapping across them would reorder subtasks among their siblings.
+        if task.parent_id != neighbour.parent_id {
+            self.message = "Reorder subtasks inside their parent task".into();
+            return Ok(());
+        }
         db::swap_tasks(&self.db, task.id, neighbour.id)?;
         match &mut self.task_view {
             Some(view) => view.selected_child = target,
@@ -1050,6 +1055,8 @@ impl App {
             KeyCode::Enter => {
                 if let Some(id) = self.current_task_id() {
                     self.open_task(id, false)?;
+                    // Today lists subtasks too; Esc returns to the list they were opened from.
+                    self.task_path.clear();
                 }
                 return Ok(());
             }

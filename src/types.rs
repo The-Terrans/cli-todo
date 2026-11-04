@@ -13,6 +13,8 @@ pub struct Task {
     pub done: bool,
     pub project_id: Option<i64>,
     pub parent_id: Option<i64>,
+    /// `None` for top-level tasks.
+    pub parent_title: Option<String>,
     pub subtask_count: usize,
     pub due_date: Option<NaiveDate>,
     /// UTC completion time; `None` for pending tasks and tasks completed before it was recorded.

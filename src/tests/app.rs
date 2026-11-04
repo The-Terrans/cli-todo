@@ -2279,6 +2279,54 @@ fn today_is_the_default_inbox_filter_and_projects_open_on_all() -> Result<()> {
 }
 
 #[test]
+fn today_opens_due_subtasks_directly_and_esc_returns_to_the_list() -> Result<()> {
+    let today = chrono::Local::now().date_naive().to_string();
+    let db = db::open(Path::new(":memory:"))?;
+    let draft = |title: &str, due: &str, subtasks| TaskDraft {
+        title: title.into(),
+        due_date: due.into(),
+        subtasks,
+        ..TaskDraft::default()
+    };
+    let subtask = |draft| SubtaskDraft {
+        id: None,
+        done: false,
+        draft,
+    };
+    db::save_task_tree(&db, None, &draft("due today", &today, vec![]), None)?;
+    db::save_task_tree(
+        &db,
+        None,
+        &draft(
+            "launch",
+            "",
+            vec![subtask(draft("write copy", &today, vec![]))],
+        ),
+        None,
+    )?;
+    let mut app = App::new(db)?;
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    assert_eq!(titles(&app), ["due today", "write copy"]);
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Down)?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::ALT))?;
+    assert_eq!(app.message, "Reorder subtasks inside their parent task");
+    assert_eq!(titles(&app), ["due today", "write copy"]);
+    app.handle_key(KeyCode::Enter)?;
+    let view = app.task_view.as_ref().expect("subtask opens");
+    assert_eq!(view.task.title, "write copy");
+    assert_eq!(view.parent_title.as_deref(), Some("launch"));
+    app.handle_key(KeyCode::Esc)?;
+    assert!(
+        app.task_view.is_none(),
+        "Esc returns to Today, not the parent"
+    );
+    assert_eq!(titles(&app), ["due today", "write copy"]);
+    Ok(())
+}
+
+#[test]
 fn inbox_restores_its_filter_and_row_after_visiting_projects() -> Result<()> {
     let mut app = app()?;
     db::save_project(&app.db, None, "Work")?;

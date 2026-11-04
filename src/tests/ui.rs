@@ -975,6 +975,44 @@ fn task_details_show_project_header_and_subtask_parent() -> Result<()> {
 }
 
 #[test]
+fn today_tags_due_subtasks_with_their_parent() -> Result<()> {
+    let today = chrono::Local::now().date_naive().to_string();
+    let db = db::open(Path::new(":memory:"))?;
+    db::save_project(&db, None, "Work")?;
+    let work = db.last_insert_rowid();
+    db::save_task_tree(
+        &db,
+        None,
+        &TaskDraft {
+            title: "launch".into(),
+            subtasks: vec![crate::types::SubtaskDraft {
+                id: None,
+                done: false,
+                draft: TaskDraft {
+                    title: "write copy".into(),
+                    due_date: today,
+                    ..TaskDraft::default()
+                },
+            }],
+            ..TaskDraft::default()
+        },
+        Some(work),
+    )?;
+    let app = App::new(db)?;
+    let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("[ ] write copy ‹launch› [Work] [due:"));
+    Ok(())
+}
+
+#[test]
 fn inbox_lists_every_project_with_tags_and_filters() -> Result<()> {
     let db = db::open(Path::new(":memory:"))?;
     db::save_project(&db, None, "Work")?;

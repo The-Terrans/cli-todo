@@ -21,7 +21,18 @@ fn reword_updates_only_task_fields_and_rolls_back_invalid_dates() -> Result<()> 
     assert_eq!(after[0].due_date, parse_due_date("2028-02-29")?);
     assert_eq!(after[0].project_id, Some(project));
     assert_eq!(after[0].done, before[0].done);
-    assert_eq!(&after[1..], &before[1..]);
+    // Subtasks keep their fields; only the parent title they carry follows the rename.
+    let children: Vec<_> = before[1..]
+        .iter()
+        .cloned()
+        .map(|mut task| {
+            if task.parent_id == Some(id) {
+                task.parent_title = Some("reworded".into());
+            }
+            task
+        })
+        .collect();
+    assert_eq!(after[1..], children);
     draft.title = "must roll back".into();
     draft.due_date = "2026-02-30".into();
     assert!(reword_task(&db, id, &draft).is_err());
@@ -717,38 +728,64 @@ fn project_positions_migrate_in_creation_order_swap_and_append_new_projects() ->
 }
 
 #[test]
-fn today_roots_include_overdue_and_parents_of_due_subtasks() -> Result<()> {
-    let today = parse_due_date("2026-10-22")?.unwrap();
-    let task = |id, parent_id, done, due: &str| -> Result<Task> {
-        Ok(Task {
-            id,
-            title: id.to_string(),
-            description: String::new(),
-            done,
-            project_id: None,
-            parent_id,
-            subtask_count: 0,
-            due_date: parse_due_date(due)?,
-            completed_at: None,
-        })
+fn today_lists_due_tasks_and_subtasks_themselves() -> Result<()> {
+    let today = Local::now().date_naive();
+    let db = open(Path::new(":memory:"))?;
+    let draft = |title: &str, due: String, subtasks| TaskDraft {
+        title: title.into(),
+        due_date: due,
+        subtasks,
+        ..TaskDraft::default()
     };
-    let tasks = [
-        task(1, None, false, "2026-10-22")?,
-        task(2, None, false, "2026-10-01")?,
-        task(3, None, false, "2026-10-23")?,
-        task(4, None, true, "2026-10-22")?,
-        task(5, None, false, "")?,
-        task(6, Some(5), false, "")?,
-        task(7, Some(6), false, "2026-10-20")?,
-        task(8, None, false, "")?,
-        task(9, Some(8), true, "2026-10-20")?,
-    ];
-    let mut roots: Vec<_> = roots_due_by(&tasks, today).into_iter().collect();
-    roots.sort();
+    let subtask = |draft, done| SubtaskDraft {
+        id: None,
+        done,
+        draft,
+    };
+    let overdue = (today - chrono::Days::new(3)).to_string();
+    let later = (today + chrono::Days::new(3)).to_string();
+    for task in [
+        draft("due today", today.to_string(), vec![]),
+        draft("overdue", overdue.clone(), vec![]),
+        draft("later", later.clone(), vec![]),
+        draft(
+            "undated parent",
+            String::new(),
+            vec![subtask(
+                draft(
+                    "undated child",
+                    String::new(),
+                    vec![subtask(draft("due grandchild", overdue, vec![]), false)],
+                ),
+                false,
+            )],
+        ),
+        draft(
+            "due parent",
+            today.to_string(),
+            vec![
+                subtask(draft("due child", today.to_string(), vec![]), false),
+                subtask(draft("done child", today.to_string(), vec![]), true),
+                subtask(draft("later child", later, vec![]), false),
+            ],
+        ),
+    ] {
+        save_task_tree(&db, None, &task, None)?;
+    }
+    let listed: Vec<_> = list_tasks_in(&db, Filter::Today, None, Sort::Manual)?
+        .into_iter()
+        .map(|task| (task.title, task.parent_title))
+        .collect();
+    let parent = |title: &str| Some(title.to_string());
     assert_eq!(
-        roots,
-        [1, 2, 5],
-        "due today, overdue, and a nested due subtask's root"
+        listed,
+        [
+            ("due today".into(), None),
+            ("overdue".into(), None),
+            ("due grandchild".into(), parent("undated child")),
+            ("due parent".into(), None),
+            ("due child".into(), parent("due parent")),
+        ]
     );
     Ok(())
 }
