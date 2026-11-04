@@ -1101,6 +1101,13 @@ impl App {
                     };
                 }
             }
+            Action::Duplicate => {
+                if let Some(id) = self.hovered_task_id() {
+                    db::duplicate_task(&self.db, id)?;
+                    self.refresh_tasks()?;
+                    self.message = "Duplicated task".into();
+                }
+            }
             Action::ShowFilter(filter) => {
                 if self.commits_focused {
                     self.focus_inbox()?;

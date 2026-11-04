@@ -99,12 +99,13 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Tab/Shift+Tab Cycles panel focus in browsing; popup fields in editor",
 ];
 
-pub(crate) const ACTIONS: [(&str, Action); 11] = [
+pub(crate) const ACTIONS: [(&str, Action); 12] = [
     ("Add task", Action::Add),
     ("Edit selected task", Action::Edit),
     ("Complete / reopen selected task", Action::ToggleCompletion),
     ("Delete selected task", Action::Delete),
     ("Move selected task", Action::Move),
+    ("Duplicate selected task", Action::Duplicate),
     ("Show today's tasks", Action::ShowFilter(0)),
     ("Show all tasks", Action::ShowFilter(ALL_FILTER)),
     ("Show pending tasks", Action::ShowFilter(2)),

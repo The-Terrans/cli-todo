@@ -295,6 +295,24 @@ pub fn save_task_tree(
     save_tree(db, id, draft, project, None)
 }
 
+/// Copies a task and its subtree under the same project and parent; the copy starts pending.
+pub fn duplicate_task(db: &Connection, id: i64) -> Result<()> {
+    fn forget_ids(subtasks: &mut [SubtaskDraft]) {
+        for subtask in subtasks {
+            subtask.id = None;
+            forget_ids(&mut subtask.draft.subtasks);
+        }
+    }
+    let mut draft = task_draft(db, id)?;
+    forget_ids(&mut draft.subtasks);
+    let (project, parent) = db.query_row(
+        "SELECT project_id,parent_id FROM tasks WHERE id=?1",
+        [id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    save_tree(db, None, &draft, project, parent)
+}
+
 pub fn save_subtask_tree(db: &Connection, parent: i64, draft: &TaskDraft) -> Result<()> {
     let project = db.query_row(
         "SELECT project_id FROM tasks WHERE id=?1",

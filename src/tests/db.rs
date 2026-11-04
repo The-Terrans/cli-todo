@@ -100,6 +100,59 @@ fn due_dates_persist_for_tasks_and_subtasks_without_reordering() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn duplicate_copies_the_subtree_in_place_and_starts_pending() -> Result<()> {
+    let db = open(Path::new(":memory:"))?;
+    save_project(&db, None, "Work")?;
+    let project = db.last_insert_rowid();
+    let mut draft = nested_draft();
+    draft.due_date = "2028-02-29".into();
+    draft.subtasks[1].done = true;
+    save_task_tree(&db, None, &draft, Some(project))?;
+    let root = list_tasks(&db, Filter::All)?[0].id;
+    toggle_task(&db, root)?;
+    let before = list_tasks(&db, Filter::All)?;
+    duplicate_task(&db, root)?;
+    let after = list_tasks(&db, Filter::All)?;
+    assert_eq!(&after[..before.len()], &before[..]);
+    let copy = &after[before.len()];
+    assert_eq!((copy.title.as_str(), copy.done), ("parent", false));
+    assert_eq!((copy.project_id, copy.parent_id), (Some(project), None));
+    assert_eq!(copy.due_date, parse_due_date("2028-02-29")?);
+    let copied = task_draft(&db, copy.id)?;
+    let original = task_draft(&db, root)?;
+    assert_eq!(
+        format!(
+            "{:?}",
+            copied
+                .subtasks
+                .iter()
+                .map(|s| (&s.draft.title, s.done))
+                .collect::<Vec<_>>()
+        ),
+        format!(
+            "{:?}",
+            original
+                .subtasks
+                .iter()
+                .map(|s| (&s.draft.title, s.done))
+                .collect::<Vec<_>>()
+        )
+    );
+    assert_eq!(
+        copied.subtasks[0].draft.subtasks[0].draft.description,
+        "nested details"
+    );
+    let child = original.subtasks[0].id.unwrap();
+    duplicate_task(&db, child)?;
+    let children = task_draft(&db, root)?.subtasks;
+    assert_eq!(children.len(), 3);
+    assert_eq!(children[2].draft.title, "child");
+    assert_eq!(children[2].draft.subtasks[0].draft.title, "grandchild");
+    validate_hierarchy(&db)?;
+    Ok(())
+}
+
 fn nested_draft() -> TaskDraft {
     let leaf = SubtaskDraft {
         id: None,
