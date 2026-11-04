@@ -1143,6 +1143,10 @@ impl App {
                 self.select_filter(filter)?;
                 self.navigation_focused = false;
             }
+            Action::GoToInboxFilter(filter) => {
+                self.focus_inbox()?;
+                self.select_filter(filter)?;
+            }
             Action::OpenProject(id) => {
                 self.commits_focused = false;
                 self.show_project(Some(id));
@@ -1218,7 +1222,11 @@ impl App {
                 (has_task
                     || matches!(
                         action,
-                        Action::Add | Action::ShowFilter(_) | Action::ResetHistory | Action::Quit
+                        Action::Add
+                            | Action::ShowFilter(_)
+                            | Action::GoToInboxFilter(_)
+                            | Action::ResetHistory
+                            | Action::Quit
                     ))
                     && label.to_lowercase().contains(&query)
             })

@@ -53,6 +53,8 @@ pub enum Action {
     Move,
     Duplicate,
     ShowFilter(usize),
+    /// Opens Inbox with the given filter and focuses its navigation section.
+    GoToInboxFilter(usize),
     OpenProject(i64),
     OpenTask(i64),
     ResetHistory,

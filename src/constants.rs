@@ -100,7 +100,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Tab/Shift+Tab Cycles panel focus in browsing; popup fields in editor",
 ];
 
-pub(crate) const ACTIONS: [(&str, Action); 12] = [
+pub(crate) const ACTIONS: [(&str, Action); 16] = [
     ("Add task", Action::Add),
     ("Edit selected task", Action::Edit),
     ("Complete / reopen selected task", Action::ToggleCompletion),
@@ -111,6 +111,10 @@ pub(crate) const ACTIONS: [(&str, Action); 12] = [
     ("Show all tasks", Action::ShowFilter(ALL_FILTER)),
     ("Show pending tasks", Action::ShowFilter(2)),
     ("Show completed tasks", Action::ShowFilter(3)),
+    ("Go to Inbox: Today", Action::GoToInboxFilter(0)),
+    ("Go to Inbox: All", Action::GoToInboxFilter(ALL_FILTER)),
+    ("Go to Inbox: Pending", Action::GoToInboxFilter(2)),
+    ("Go to Inbox: Completed", Action::GoToInboxFilter(3)),
     ("Reset todo history", Action::ResetHistory),
     ("Quit", Action::Quit),
 ];
