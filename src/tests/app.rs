@@ -1323,6 +1323,7 @@ fn projects_create_move_search_rename_and_confirm_deletion() -> Result<()> {
     assert_eq!(app.current_project, Some(project));
     app.handle_key(KeyCode::Char('a'))?;
     app.handle_key(KeyCode::Char('x'))?;
+    app.handle_key(KeyCode::Char('y'))?;
     app.handle_key(KeyCode::Enter)?;
     let task = app.tasks[0].id;
     assert_eq!(app.tasks[0].project_id, Some(project));
@@ -1333,13 +1334,13 @@ fn projects_create_move_search_rename_and_confirm_deletion() -> Result<()> {
     app.handle_key(KeyCode::Enter)?;
     assert!(app.tasks.is_empty());
     app.handle_key(KeyCode::Char('1'))?;
-    search_actions(&mut app, "x")?;
+    search_actions(&mut app, "xy")?;
     app.handle_key(KeyCode::Enter)?;
     assert_eq!(app.tasks[app.selected_task].id, task);
     app.handle_key(KeyCode::Char('m'))?;
     app.handle_key(KeyCode::Down)?;
     app.handle_key(KeyCode::Enter)?;
-    search_actions(&mut app, "x")?;
+    search_actions(&mut app, "xy")?;
     app.handle_key(KeyCode::Enter)?;
     assert_eq!(app.current_project, Some(project));
     app.handle_key(KeyCode::Esc)?;
@@ -1511,6 +1512,34 @@ fn palette_search_and_arrows_select_a_filter() -> Result<()> {
 }
 
 #[test]
+fn palette_goes_to_inbox_filter_section_from_projects_and_commits() -> Result<()> {
+    let mut app = app()?;
+    db::save_project(&app.db, None, "Work")?;
+    let work = app.db.last_insert_rowid();
+    db::create_task(&app.db, "project task", Some(work))?;
+    db::save_task(&app.db, None, "inbox task")?;
+    app.refresh_projects()?;
+    app.handle_key(KeyCode::Char('2'))?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.current_project, Some(work));
+    search_actions(&mut app, "go to inbox: pending")?;
+    assert_eq!(app.palette_actions().len(), 1);
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.current_project, None);
+    assert_eq!(app.selected_filter, 2);
+    assert!(app.navigation_focused && !app.projects_focused);
+    let titles: Vec<_> = app.tasks.iter().map(|task| task.title.as_str()).collect();
+    assert_eq!(titles, ["project task", "inbox task"]);
+    app.handle_key(KeyCode::Char('3'))?;
+    search_actions(&mut app, "go to inbox: completed")?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.selected_filter, 3);
+    assert!(app.navigation_focused && !app.commits_focused);
+    assert!(app.tasks.is_empty());
+    Ok(())
+}
+
+#[test]
 fn palette_handles_no_matches_and_requires_enter_to_quit() -> Result<()> {
     let mut app = app()?;
     search_actions(&mut app, "")?;
@@ -1525,6 +1554,10 @@ fn palette_handles_no_matches_and_requires_enter_to_quit() -> Result<()> {
             Action::ShowFilter(1),
             Action::ShowFilter(2),
             Action::ShowFilter(3),
+            Action::GoToInboxFilter(0),
+            Action::GoToInboxFilter(1),
+            Action::GoToInboxFilter(2),
+            Action::GoToInboxFilter(3),
             Action::ResetHistory,
             Action::Quit
         ]
