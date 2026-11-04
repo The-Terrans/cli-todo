@@ -127,6 +127,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Up / Down in Description     | Move between explicit newline-separated lines             |
 | Home / End in editors        | Move to the beginning/end of the current line             |
 | Backspace / Delete in editors | Delete the character before/after the cursor             |
+| Ctrl+W in editors and search | Delete the word before the cursor                         |
 | Esc in text entry            | Discard changes                                          |
 | q while browsing             | Quit                                                     |
 | Ctrl+K while browsing        | Open searchable command palette                          |

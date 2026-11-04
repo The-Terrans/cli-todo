@@ -63,6 +63,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Home / End    Move to the current line's beginning/end in editors",
     "  Backspace/Del Remove character before/after the editor cursor",
     "  Backspace     Search: remove last character",
+    "  Ctrl+W        Delete the word before the cursor; search too",
     "  Enter         Save title/text; run search result; choose destination",
     "  Enter         Insert newline when task Description is focused",
     "  Tab/Shift+Tab Cycle Title / Description / Due date",

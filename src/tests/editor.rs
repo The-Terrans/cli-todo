@@ -286,3 +286,72 @@ fn compact_editors_share_cursor_keys_and_reset_cursor_on_open() -> Result<()> {
     assert!(matches!(&app.mode, Mode::Palette { query, .. } if query == "ab"));
     Ok(())
 }
+
+#[test]
+fn word_deletion_removes_trailing_spaces_and_the_word_before_the_cursor() {
+    let mut cursor = TextCursor::default();
+    let mut text = "first\nsay 界é  ".to_string();
+    let range = cursor.word_deletion_range(&text);
+    cursor.delete(&mut text, range);
+    assert_eq!(cursor.marked(&text), "first\nsay ▏");
+    let range = cursor.word_deletion_range(&text);
+    cursor.delete(&mut text, range);
+    assert_eq!(cursor.marked(&text), "first\n▏");
+    let range = cursor.word_deletion_range(&text);
+    cursor.delete(&mut text, range);
+    assert_eq!(cursor.marked(&text), "▏");
+    assert_eq!(cursor.word_deletion_range(&text), 0..0);
+    let mut text = "one two".to_string();
+    cursor.handle(&mut text, KeyCode::End, false);
+    cursor.handle(&mut text, KeyCode::Left, false);
+    let range = cursor.word_deletion_range(&text);
+    cursor.delete(&mut text, range);
+    assert_eq!(cursor.marked(&text), "one ▏o");
+}
+
+#[test]
+fn ctrl_w_deletes_the_word_before_the_cursor_in_every_text_input() -> Result<()> {
+    let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    let mut app = App::new_showing_all(db::open(Path::new(":memory:"))?)?;
+    for mode in [
+        Mode::ProjectEdit(None, "my project".into()),
+        Mode::CommitEdit("my project".into()),
+        Mode::RemoteEdit("my project".into()),
+    ] {
+        app.mode = mode;
+        app.input_cursor = TextCursor::default();
+        app.handle_key_event(ctrl_w)?;
+        let (Mode::ProjectEdit(_, text) | Mode::CommitEdit(text) | Mode::RemoteEdit(text)) =
+            &app.mode
+        else {
+            panic!("editor closed");
+        };
+        assert_eq!(text, "my ");
+    }
+    app.mode = Mode::Palette {
+        query: "add task".into(),
+        selected: 2,
+    };
+    app.handle_key_event(ctrl_w)?;
+    assert!(matches!(&app.mode, Mode::Palette { query, selected: 0 } if query == "add "));
+    app.mode = Mode::Browse;
+    app.handle_key(KeyCode::Char('a'))?;
+    for c in "chore today".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    assert!(matches!(&app.mode, Mode::Edit(_, draft) if draft.auto_date.is_some()));
+    app.handle_key_event(ctrl_w)?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "chore " && draft.auto_date.is_none() && draft.due_date.is_empty())
+    );
+    app.handle_key(KeyCode::Tab)?;
+    for c in "line one\nnext".chars() {
+        app.handle_key(KeyCode::Char(c))?;
+    }
+    app.handle_key_event(ctrl_w)?;
+    app.handle_key_event(ctrl_w)?;
+    assert!(
+        matches!(&app.mode, Mode::Edit(_, draft) if draft.title == "chore " && draft.description == "line ")
+    );
+    Ok(())
+}
