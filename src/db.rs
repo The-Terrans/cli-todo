@@ -4,7 +4,7 @@ use crate::{
     types::{Filter, Project, Sort, SubtaskDraft, Task, TaskDraft},
     Result,
 };
-use chrono::{Local, NaiveDate};
+use chrono::Local;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{
     cmp::Ordering,
@@ -482,13 +482,14 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
     } else {
         "''"
     };
-    let (parent, subtask_count) = if has_column(db, "parent_id")? {
+    let (parent, parent_title, subtask_count) = if has_column(db, "parent_id")? {
         (
             "parent_id",
+            "(SELECT title FROM tasks AS parent WHERE parent.id=tasks.parent_id)",
             "(SELECT COUNT(*) FROM tasks AS child WHERE child.parent_id=tasks.id)",
         )
     } else {
-        ("NULL", "0")
+        ("NULL", "NULL", "0")
     };
     let due_date = if has_column(db, "due_date")? {
         "due_date"
@@ -506,7 +507,7 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
         "NULL"
     };
     let mut statement = db.prepare(&format!(
-        "SELECT id,title,done,project_id,{description},{parent},{subtask_count},{due_date},{completed_at} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY {position},id"
+        "SELECT id,title,done,project_id,{description},{parent},{subtask_count},{due_date},{completed_at},{parent_title} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY {position},id"
     ))?;
     let rows = statement.query_map([done], |row| {
         let date: Option<String> = row.get(7)?;
@@ -527,6 +528,7 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
             done: row.get(2)?,
             project_id: row.get(3)?,
             parent_id: row.get(5)?,
+            parent_title: row.get(9)?,
             subtask_count: row.get(6)?,
             due_date,
             completed_at: row.get(8)?,
@@ -569,6 +571,7 @@ fn set_task_done(db: &Connection, id: i64, done: bool) -> Result<()> {
 }
 
 /// Lists top-level tasks in `project`, or all top-level tasks (any project or none) when `None`.
+/// Today instead lists every unfinished task due by today, subtasks included.
 /// Pending tasks come first in `sort` order, then completed tasks, most recently completed first.
 pub fn list_tasks_in(
     db: &Connection,
@@ -576,20 +579,16 @@ pub fn list_tasks_in(
     project: Option<i64>,
     sort: Sort,
 ) -> Result<Vec<Task>> {
-    let due = if filter == Filter::Today {
-        Some(roots_due_by(
-            &list_tasks(db, Filter::All)?,
-            Local::now().date_naive(),
-        ))
-    } else {
-        None
-    };
+    let today = Local::now().date_naive();
     let mut tasks: Vec<_> = list_tasks(db, filter)?
         .into_iter()
         .filter(|task| {
-            task.parent_id.is_none()
-                && project.is_none_or(|id| task.project_id == Some(id))
-                && due.as_ref().is_none_or(|due| due.contains(&task.id))
+            let listed = if filter == Filter::Today {
+                task.due_date.is_some_and(|date| date <= today)
+            } else {
+                task.parent_id.is_none()
+            };
+            listed && project.is_none_or(|id| task.project_id == Some(id))
         })
         .collect();
     tasks.sort_by(|a, b| compare_tasks(a, b, sort));
@@ -617,25 +616,6 @@ fn compare_tasks(a: &Task, b: &Task, sort: Sort) -> Ordering {
         (false, Sort::CreatedAsc) => a.id.cmp(&b.id),
         (false, Sort::CreatedDesc) => b.id.cmp(&a.id),
     })
-}
-
-/// Top-level ids whose task or any descendant is unfinished and due on or before `today`.
-pub fn roots_due_by(tasks: &[Task], today: NaiveDate) -> HashSet<i64> {
-    let parents: HashMap<_, _> = tasks.iter().map(|task| (task.id, task.parent_id)).collect();
-    tasks
-        .iter()
-        .filter(|task| !task.done && task.due_date.is_some_and(|date| date <= today))
-        .map(|task| {
-            let mut id = task.id;
-            for _ in 0..=MAX_SUBTASK_DEPTH {
-                match parents.get(&id) {
-                    Some(Some(parent)) => id = *parent,
-                    _ => break,
-                }
-            }
-            id
-        })
-        .collect()
 }
 
 pub fn move_task(db: &Connection, id: i64, project: Option<i64>) -> Result<()> {

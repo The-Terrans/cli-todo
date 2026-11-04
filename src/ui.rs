@@ -448,6 +448,18 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
                 ),
             );
         }
+        // Today lists subtasks on their own, so name the parent they belong to.
+        if let Some(parent) = &task.parent_title {
+            title.spans.insert(
+                1,
+                Span::styled(
+                    format!(" ‹{parent}›"),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .remove_modifier(Modifier::BOLD),
+                ),
+            );
+        }
         let mut lines = vec![title];
         let mut description = task
             .description
