@@ -51,6 +51,7 @@ pub enum Action {
     ToggleCompletion,
     Delete,
     Move,
+    Duplicate,
     ShowFilter(usize),
     OpenProject(i64),
     OpenTask(i64),

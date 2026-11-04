@@ -20,6 +20,15 @@ impl TaskDraft {
         };
         self.cursors[self.focus as usize].handle(text, key, self.focus == TaskField::Description);
     }
+
+    pub fn delete_focused(&mut self, range: Range<usize>) {
+        let text = match self.focus {
+            TaskField::Title => &mut self.title,
+            TaskField::Description => &mut self.description,
+            TaskField::DueDate => &mut self.due_date,
+        };
+        self.cursors[self.focus as usize].delete(text, range);
+    }
 }
 
 /// Byte offsets stay on UTF-8 boundaries. An unset cursor starts at the text end.
@@ -54,6 +63,23 @@ impl TextCursor {
             }
             _ => position..position,
         }
+    }
+
+    /// Ctrl+W: trailing whitespace plus the whitespace-delimited word before the cursor.
+    pub fn word_deletion_range(&self, text: &str) -> Range<usize> {
+        let position = self.position(text);
+        let before = text[..position].trim_end();
+        let start = before
+            .char_indices()
+            .rfind(|(_, character)| character.is_whitespace())
+            .map_or(0, |(i, character)| i + character.len_utf8());
+        start..position
+    }
+
+    pub fn delete(&mut self, text: &mut String, range: Range<usize>) {
+        self.position = Some(range.start);
+        self.preferred_column = None;
+        text.replace_range(range, "");
     }
 
     pub fn handle(&mut self, text: &mut String, key: KeyCode, multiline: bool) -> bool {
@@ -103,9 +129,8 @@ impl TextCursor {
             }
             KeyCode::Backspace | KeyCode::Delete => {
                 let range = self.deletion_range(text, key);
-                let next = range.start;
-                text.replace_range(range, "");
-                next
+                self.delete(text, range);
+                return true;
             }
             _ => return false,
         };

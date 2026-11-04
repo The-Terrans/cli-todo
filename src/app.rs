@@ -10,6 +10,7 @@ use crate::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rusqlite::Connection;
+use std::ops::Range;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
@@ -351,6 +352,10 @@ impl App {
                 self.message.clear();
                 self.save_task_edit()?;
             }
+            return Ok(false);
+        }
+        if modifiers == KeyModifiers::CONTROL && matches!(key.code, KeyCode::Char('w' | 'W')) {
+            self.delete_word_before();
             return Ok(false);
         }
         if modifiers == KeyModifiers::ALT
@@ -1096,6 +1101,13 @@ impl App {
                     };
                 }
             }
+            Action::Duplicate => {
+                if let Some(id) = self.hovered_task_id() {
+                    db::duplicate_task(&self.db, id)?;
+                    self.refresh_tasks()?;
+                    self.message = "Duplicated task".into();
+                }
+            }
             Action::ShowFilter(filter) => {
                 if self.commits_focused {
                     self.focus_inbox()?;
@@ -1280,33 +1292,62 @@ impl App {
                 } else {
                     key
                 };
-                let deleting = matches!(key, KeyCode::Backspace | KeyCode::Delete);
-                let changing = deleting || matches!(key, KeyCode::Char(_));
-                if deleting {
+                if matches!(key, KeyCode::Backspace | KeyCode::Delete) {
                     let text = draft.field_text(draft.focus);
                     let range = draft.cursors[draft.focus as usize].deletion_range(text, key);
-                    if draft.auto_date.as_ref().is_some_and(|auto| {
-                        auto.field == draft.focus
-                            && range.start < auto.phrase.range.end
-                            && range.end > auto.phrase.range.start
-                    }) {
-                        Self::dismiss_auto_date(draft, true);
-                    }
+                    Self::delete_from_draft(draft, range);
+                    return Ok(());
                 }
-                if changing && draft.focus == TaskField::DueDate {
+                let typing = matches!(key, KeyCode::Char(_));
+                if typing && draft.focus == TaskField::DueDate {
                     Self::dismiss_auto_date(draft, false);
                 }
                 draft.edit_focused(key);
-                if changing && draft.focus != TaskField::DueDate {
-                    if deleting {
-                        Self::refresh_auto_date(draft, false);
-                    } else {
-                        Self::update_auto_date(draft);
-                    }
+                if typing && draft.focus != TaskField::DueDate {
+                    Self::update_auto_date(draft);
                 }
             }
         }
         Ok(())
+    }
+
+    fn delete_from_draft(draft: &mut TaskDraft, range: Range<usize>) {
+        if draft.auto_date.as_ref().is_some_and(|auto| {
+            auto.field == draft.focus
+                && range.start < auto.phrase.range.end
+                && range.end > auto.phrase.range.start
+        }) {
+            Self::dismiss_auto_date(draft, true);
+        }
+        if draft.focus == TaskField::DueDate {
+            Self::dismiss_auto_date(draft, false);
+        }
+        draft.delete_focused(range);
+        if draft.focus != TaskField::DueDate {
+            Self::refresh_auto_date(draft, false);
+        }
+    }
+
+    /// Ctrl+W in task editors, input dialogs and search.
+    fn delete_word_before(&mut self) {
+        self.message.clear();
+        match &mut self.mode {
+            Mode::Edit(_, draft) => {
+                let text = draft.field_text(draft.focus);
+                let range = draft.cursors[draft.focus as usize].word_deletion_range(text);
+                Self::delete_from_draft(draft, range);
+            }
+            Mode::Palette { query, selected } => {
+                let range = crate::editor::TextCursor::default().word_deletion_range(query);
+                query.truncate(range.start);
+                *selected = 0;
+            }
+            Mode::ProjectEdit(_, text) | Mode::CommitEdit(text) | Mode::RemoteEdit(text) => {
+                let range = self.input_cursor.word_deletion_range(text);
+                self.input_cursor.delete(text, range);
+            }
+            _ => {}
+        }
     }
 
     fn dismiss_auto_date(draft: &mut TaskDraft, clear: bool) {

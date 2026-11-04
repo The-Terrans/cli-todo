@@ -1574,6 +1574,21 @@ fn palette_reuses_task_actions_and_delete_confirmation() -> Result<()> {
 }
 
 #[test]
+fn palette_duplicates_the_selected_task_without_a_shortcut() -> Result<()> {
+    let mut app = app()?;
+    db::create_task(&app.db, "original", None)?;
+    app.refresh_tasks()?;
+    app.navigation_focused = false;
+    search_actions(&mut app, "duplicate")?;
+    app.handle_key(KeyCode::Enter)?;
+    let titles: Vec<_> = app.tasks.iter().map(|task| task.title.as_str()).collect();
+    assert_eq!(titles, ["original", "original"]);
+    assert_eq!(app.message, "Duplicated task");
+    assert!(app.uncommitted_changes);
+    Ok(())
+}
+
+#[test]
 fn control_keys_preserve_drafts_and_do_not_run_plain_shortcuts() -> Result<()> {
     let mut app = app()?;
     let ctrl_k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);

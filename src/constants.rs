@@ -63,6 +63,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Home / End    Move to the current line's beginning/end in editors",
     "  Backspace/Del Remove character before/after the editor cursor",
     "  Backspace     Search: remove last character",
+    "  Ctrl+W        Delete the word before the cursor; search too",
     "  Enter         Save title/text; run search result; choose destination",
     "  Enter         Insert newline when task Description is focused",
     "  Tab/Shift+Tab Cycle Title / Description / Due date",
@@ -98,12 +99,13 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Tab/Shift+Tab Cycles panel focus in browsing; popup fields in editor",
 ];
 
-pub(crate) const ACTIONS: [(&str, Action); 11] = [
+pub(crate) const ACTIONS: [(&str, Action); 12] = [
     ("Add task", Action::Add),
     ("Edit selected task", Action::Edit),
     ("Complete / reopen selected task", Action::ToggleCompletion),
     ("Delete selected task", Action::Delete),
     ("Move selected task", Action::Move),
+    ("Duplicate selected task", Action::Duplicate),
     ("Show today's tasks", Action::ShowFilter(0)),
     ("Show all tasks", Action::ShowFilter(ALL_FILTER)),
     ("Show pending tasks", Action::ShowFilter(2)),
