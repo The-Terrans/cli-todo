@@ -238,15 +238,23 @@ fn opened_tasks_render_inline_details_and_optional_subtasks() -> Result<()> {
 fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
     let today = parse_due_date("2026-08-15")?.unwrap();
     let due = parse_due_date("2026-08-14")?;
-    let overdue = task_title_line("dated", false, 2, due, Style::default(), today);
+    let overdue = task_title_line("dated", false, 2, None, due, Style::default(), today);
     assert_eq!(overdue.spans[0].content, "[ ] dated (2 subtasks)");
     assert_eq!(overdue.spans[1].content, " [due: 2026-08-14 Yesterday]");
     assert_eq!(overdue.spans[1].style.fg, Some(Color::LightRed));
-    let selected = task_title_line("dated", false, 0, due, task_selection_style(), today);
+    let selected = task_title_line("dated", false, 0, None, due, task_selection_style(), today);
     assert_eq!(selected.spans[1].style.fg, Some(Color::LightRed));
-    let completed = task_title_line("dated", true, 0, due, Style::default(), today);
+    let completed = task_title_line("dated", true, 0, None, due, Style::default(), today);
     assert_eq!(completed.spans[1].style.fg, Some(Color::DarkGray));
-    let due_today = task_title_line("dated", false, 0, Some(today), Style::default(), today);
+    let due_today = task_title_line(
+        "dated",
+        false,
+        0,
+        None,
+        Some(today),
+        Style::default(),
+        today,
+    );
     assert_eq!(due_today.spans[1].style.fg, Some(Color::Gray));
     assert_eq!(due_today.spans[1].content, " [due: 2026-08-15 Today]");
     for (due, badge) in [
@@ -258,6 +266,7 @@ fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
             "dated",
             false,
             0,
+            None,
             parse_due_date(due)?,
             Style::default(),
             today,
@@ -265,11 +274,57 @@ fn date_badges_highlight_only_overdue_unfinished_tasks() -> Result<()> {
         assert_eq!(line.spans[1].content, badge);
     }
     assert_eq!(
-        task_title_line("undated", false, 0, None, Style::default(), today)
+        task_title_line("undated", false, 0, None, None, Style::default(), today)
             .spans
             .len(),
         1
     );
+    Ok(())
+}
+
+#[test]
+fn priority_badges_follow_the_checkbox_in_their_colors() -> Result<()> {
+    let today = parse_due_date("2026-08-15")?.unwrap();
+    for (priority, color) in [
+        (1, Color::LightRed),
+        (2, Color::Yellow),
+        (3, Color::LightBlue),
+    ] {
+        let line = task_title_line(
+            "ranked",
+            false,
+            0,
+            Some(priority),
+            None,
+            Style::default(),
+            today,
+        );
+        let contents: Vec<_> = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(contents, ["[ ] ", &format!("[P{priority}] "), "ranked"]);
+        assert_eq!(line.spans[1].style.fg, Some(color));
+    }
+    let completed = task_title_line("ranked", true, 0, Some(1), None, Style::default(), today);
+    assert_eq!(completed.spans[1].style.fg, Some(Color::DarkGray));
+
+    let db = db::open(Path::new(":memory:"))?;
+    db::save_project(&db, None, "Work")?;
+    db::create_task(&db, "ranked", Some(db.last_insert_rowid()))?;
+    db::set_priority(&db, db.last_insert_rowid(), Some(2))?;
+    let app = App::new_showing_all(db)?;
+    let mut terminal = Terminal::new(TestBackend::new(100, 10))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("[ ] [P2] ranked [Work]"), "{text}");
     Ok(())
 }
 

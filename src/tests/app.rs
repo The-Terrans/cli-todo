@@ -2141,12 +2141,7 @@ fn sort_popup_orders_pending_tasks_and_limits_reordering_to_manual_order() -> Re
     assert_eq!(app.selected_task, 0);
     keys(
         &mut app,
-        &[
-            KeyCode::Char('r'),
-            KeyCode::Down,
-            KeyCode::Down,
-            KeyCode::Enter,
-        ],
+        &[KeyCode::Char('r'), KeyCode::Down, KeyCode::Enter],
     )?;
     assert_eq!(app.sort, Sort::CreatedDesc);
     assert_eq!(titles(&app), ["second", "first", "third"]);
@@ -2404,5 +2399,70 @@ fn p_pulls_and_shift_p_pushes_from_every_browsing_panel() -> Result<()> {
     app.handle_key(KeyCode::Char('p'))?;
     app.handle_key(KeyCode::Char('P'))?;
     assert!(matches!(&app.mode, Mode::Edit(None, draft) if draft.title == "pP"));
+    Ok(())
+}
+
+#[test]
+fn bang_sets_priority_of_the_hovered_task_or_subtask_and_palette_sets_it_too() -> Result<()> {
+    let mut app = app()?;
+    search_actions(&mut app, "set priority")?;
+    assert!(app.palette_actions().is_empty(), "hidden without a task");
+    app.handle_key(KeyCode::Esc)?;
+    create_task(&mut app, "parent")?;
+    app.handle_key(KeyCode::Char('0'))?;
+    app.handle_key(KeyCode::Char('!'))?;
+    assert!(
+        matches!(app.mode, Mode::Priority { selected: 3, .. }),
+        "unset tasks start on No priority"
+    );
+    app.handle_key(KeyCode::Down)?;
+    assert!(
+        matches!(app.mode, Mode::Priority { selected: 0, .. }),
+        "Down wraps from No priority to P1"
+    );
+    app.handle_key(KeyCode::Up)?;
+    assert!(
+        matches!(app.mode, Mode::Priority { selected: 3, .. }),
+        "Up wraps from P1 to No priority"
+    );
+    keys(&mut app, &[KeyCode::Up, KeyCode::Esc])?;
+    assert!(matches!(app.mode, Mode::Browse));
+    assert_eq!(app.tasks[0].priority, None, "Esc keeps the priority");
+    keys(
+        &mut app,
+        &[KeyCode::Char('!'), KeyCode::Up, KeyCode::Up, KeyCode::Enter],
+    )?;
+    assert_eq!(app.tasks[0].priority, Some(2));
+    app.handle_key(KeyCode::Char('!'))?;
+    assert!(
+        matches!(app.mode, Mode::Priority { selected: 1, .. }),
+        "the popup starts on the current priority"
+    );
+    keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter])?;
+    assert_eq!(app.tasks[0].priority, None);
+
+    app.handle_key(KeyCode::Enter)?;
+    create_task(&mut app, "child")?;
+    app.handle_key(KeyCode::Right)?;
+    keys(
+        &mut app,
+        &[
+            KeyCode::Char('!'),
+            KeyCode::Up,
+            KeyCode::Up,
+            KeyCode::Up,
+            KeyCode::Enter,
+        ],
+    )?;
+    let view = app.task_view.as_ref().unwrap();
+    assert_eq!(view.children[0].priority, Some(1));
+    assert_eq!(view.task.priority, None);
+
+    search_actions(&mut app, "set priority: p3")?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(
+        app.task_view.as_ref().unwrap().children[0].priority,
+        Some(3)
+    );
     Ok(())
 }

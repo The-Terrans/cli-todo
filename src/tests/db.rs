@@ -387,6 +387,7 @@ fn old_databases_migrate_without_losing_tasks() -> Result<()> {
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "existing");
     assert!(tasks[0].done);
+    assert_eq!(tasks[0].priority, None);
     save_project(&db, None, "Work")?;
     let project = db.last_insert_rowid();
     create_task(&db, "project task", Some(project))?;
@@ -787,5 +788,62 @@ fn today_lists_due_tasks_and_subtasks_themselves() -> Result<()> {
             ("due child".into(), parent("due parent")),
         ]
     );
+    Ok(())
+}
+
+#[test]
+fn priorities_persist_sort_p1_first_and_survive_edits_and_duplicates() -> Result<()> {
+    let db = open(Path::new(":memory:"))?;
+    for title in ["low", "none", "high", "mid", "high too", "done high"] {
+        create_task(&db, title, None)?;
+    }
+    for (id, priority) in [(1, 3), (3, 1), (4, 2), (5, 1), (6, 1)] {
+        set_priority(&db, id, Some(priority))?;
+    }
+    toggle_task(&db, 6)?;
+    let titles = |sort| -> Result<Vec<String>> {
+        Ok(list_tasks_in(&db, Filter::All, None, sort)?
+            .into_iter()
+            .map(|task| task.title)
+            .collect())
+    };
+    assert_eq!(
+        titles(Sort::Priority)?,
+        ["high", "high too", "mid", "low", "none", "done high"]
+    );
+    assert_eq!(
+        titles(Sort::Manual)?,
+        ["low", "none", "high", "mid", "high too", "done high"]
+    );
+    assert!(
+        set_priority(&db, 2, Some(4)).is_err(),
+        "only P1-P3 are valid"
+    );
+
+    let mut draft = task_draft(&db, 3)?;
+    assert_eq!(draft.priority, Some(1));
+    draft.title = "high edited".into();
+    save_task_tree(&db, Some(3), &draft, None)?;
+    reword_task(&db, 3, &draft)?;
+    let mut child = nested_draft();
+    child.priority = Some(2);
+    save_subtask_tree(&db, 3, &child)?;
+    duplicate_task(&db, 3)?;
+    let tasks = list_tasks(&db, Filter::All)?;
+    let priority = |title: &str| {
+        tasks
+            .iter()
+            .filter(|task| task.title == title)
+            .map(|task| task.priority)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(priority("high edited"), [Some(1), Some(1)]);
+    assert_eq!(priority("parent"), [Some(2), Some(2)]);
+    assert_eq!(priority("child"), [None, None], "subtasks keep their own");
+
+    set_priority(&db, 3, None)?;
+    assert_eq!(task_draft(&db, 3)?.priority, None);
+    save_sort(&db, None, Filter::All, Sort::Priority)?;
+    assert_eq!(load_sort(&db, None, Filter::All)?, Sort::Priority);
     Ok(())
 }

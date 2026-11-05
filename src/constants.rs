@@ -12,10 +12,18 @@ pub const FILTERS: [(&str, Filter); 4] = [
 /// Index of the All filter, used when a task must be visible regardless of status or date.
 pub const ALL_FILTER: usize = 1;
 
-pub const SORTS: [(&str, Sort); 3] = [
+pub const SORTS: [(&str, Sort); 4] = [
     ("Manual order", Sort::Manual),
     ("Created date ↑ (oldest first)", Sort::CreatedAsc),
     ("Created date ↓ (newest first)", Sort::CreatedDesc),
+    ("Priority (P1 first)", Sort::Priority),
+];
+
+pub const PRIORITIES: [(&str, Option<u8>); 4] = [
+    ("P1", Some(1)),
+    ("P2", Some(2)),
+    ("P3", Some(3)),
+    ("No priority", None),
 ];
 
 pub const KEYBINDINGS: &[&str] = &[
@@ -45,6 +53,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  d             Delete task/project with confirmation",
     "  d             Delete all completed tasks (Inbox Completed)",
     "  m             Move task to a project or No project",
+    "  !             Set task priority: P1/P2/P3/No priority",
     "  f             Filter a project's tasks: Today/All/Pending/Completed",
     "  r             Sort pending tasks per project / Inbox filter; saved",
     "  Alt+J / Alt+K Move selected pending task down/up (Manual order)",
@@ -71,7 +80,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Ctrl+S        Save from any task field",
     "  Ctrl+G        Task popup: edit whole draft in VISUAL/EDITOR",
     "  Due date      Optional YYYY-MM-DD; blank clears the deadline",
-    "  Up / Down     Choose search result, destination, filter or sort",
+    "  Up / Down     Choose search result, destination, filter, sort or priority",
     "  Esc           Cancel dialog/search/move",
     "  Ctrl+K        Close palette; does not interrupt other dialogs",
     "  Empty origin  Save empty input to remove remote settings",
@@ -100,13 +109,17 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Tab/Shift+Tab Cycles panel focus in browsing; popup fields in editor",
 ];
 
-pub(crate) const ACTIONS: [(&str, Action); 16] = [
+pub(crate) const ACTIONS: [(&str, Action); 20] = [
     ("Add task", Action::Add),
     ("Edit selected task", Action::Edit),
     ("Complete / reopen selected task", Action::ToggleCompletion),
     ("Delete selected task", Action::Delete),
     ("Move selected task", Action::Move),
     ("Duplicate selected task", Action::Duplicate),
+    ("Set priority: P1", Action::SetPriority(Some(1))),
+    ("Set priority: P2", Action::SetPriority(Some(2))),
+    ("Set priority: P3", Action::SetPriority(Some(3))),
+    ("Set priority: None", Action::SetPriority(None)),
     ("Show today's tasks", Action::ShowFilter(0)),
     ("Show all tasks", Action::ShowFilter(ALL_FILTER)),
     ("Show pending tasks", Action::ShowFilter(2)),

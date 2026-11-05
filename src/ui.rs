@@ -7,7 +7,7 @@ use editor_render::{set_cursor, set_input_cursor, task_field_text, wrapped_curso
 mod editor_render_tests;
 
 use crate::{
-    constants::{FILTERS, KEYBINDINGS, SORTS},
+    constants::{FILTERS, KEYBINDINGS, PRIORITIES, SORTS},
     dates::is_overdue,
     types::{App, Mode, Sort, Task, TaskDraft, TaskField, TaskPane, TaskView},
 };
@@ -282,6 +282,7 @@ fn task_heading_text(view: &TaskView) -> Text<'static> {
         &task.title,
         task.done,
         task.subtask_count,
+        task.priority,
         None,
         Style::default()
             .fg(Color::Reset)
@@ -396,6 +397,7 @@ fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
                     &child.title,
                     child.done,
                     child.subtask_count,
+                    child.priority,
                     child.due_date,
                     style,
                     today,
@@ -428,10 +430,13 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
             &task.title,
             task.done,
             task.subtask_count,
+            task.priority,
             task.due_date,
             title_style,
             today,
         );
+        // Tags go right after the title, before any due badge.
+        let tags = title.spans.len() - usize::from(task.due_date.is_some());
         // Inbox mixes every project, so label each task with its own.
         if let Some(project) = task
             .project_id
@@ -439,7 +444,7 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
             .and_then(|id| app.projects.iter().find(|project| project.id == id))
         {
             title.spans.insert(
-                1,
+                tags,
                 Span::styled(
                     format!(" [{}]", project.name),
                     Style::default()
@@ -451,7 +456,7 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
         // Today lists subtasks on their own, so name the parent they belong to.
         if let Some(parent) = &task.parent_title {
             title.spans.insert(
-                1,
+                tags,
                 Span::styled(
                     format!(" ‹{parent}›"),
                     Style::default()
@@ -548,6 +553,15 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
                 SORTS.iter().map(|(label, _)| *label),
                 *selected,
                 SORTS.len() as u16 + 2,
+            )
+        }
+        Mode::Priority { selected, .. } => {
+            return draw_picker(
+                frame,
+                " Priority: Enter selects, Esc cancels ",
+                PRIORITIES.iter().map(|(label, _)| *label),
+                *selected,
+                PRIORITIES.len() as u16 + 2,
             )
         }
         Mode::RemoteEdit(text) => {
@@ -813,19 +827,26 @@ fn draw_due_date(frame: &mut Frame, area: Rect, draft: &TaskDraft, message: &str
     }
 }
 
+/// The title span comes first, split after the checkbox by a priority badge when set.
 fn task_title_line(
     title: &str,
     done: bool,
     count: usize,
+    priority: Option<u8>,
     due: Option<NaiveDate>,
     style: Style,
     today: NaiveDate,
 ) -> Line<'static> {
-    let mut spans = vec![Span::raw(format!(
-        "[{}] {title}{}",
-        if done { "x" } else { " " },
-        subtask_count_label(count)
-    ))];
+    let checkbox = format!("[{}] ", if done { "x" } else { " " });
+    let title = format!("{title}{}", subtask_count_label(count));
+    let mut spans = match priority {
+        Some(priority) => vec![
+            Span::raw(checkbox),
+            Span::styled(format!("[P{priority}] "), priority_style(priority, done)),
+            Span::raw(title),
+        ],
+        None => vec![Span::raw(checkbox + &title)],
+    };
     if let Some(date) = due {
         let overdue = is_overdue(date, done, today);
         let color = if overdue {
@@ -851,6 +872,21 @@ fn task_title_line(
         spans.push(Span::styled(format!(" [due: {date}{relative}]"), badge));
     }
     Line::from(spans).style(style)
+}
+
+/// P1 red, P2 yellow, P3 blue; completed tasks are muted.
+fn priority_style(priority: u8, done: bool) -> Style {
+    if done {
+        return Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM);
+    }
+    let color = match priority {
+        1 => Color::LightRed,
+        2 => Color::Yellow,
+        _ => Color::LightBlue,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
 fn subtask_count_label(count: usize) -> String {

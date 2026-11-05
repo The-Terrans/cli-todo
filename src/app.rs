@@ -1,5 +1,5 @@
 use crate::{
-    constants::{ACTIONS, ALL_FILTER, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH, SORTS},
+    constants::{ACTIONS, ALL_FILTER, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH, PRIORITIES, SORTS},
     dates::{date_phrases, parse_due_date, remove_date_phrase},
     db,
     types::{
@@ -332,9 +332,24 @@ impl App {
             KeyCode::Char('m') => {
                 self.execute_action(Action::Move)?;
             }
+            KeyCode::Char('!') => self.begin_priority(),
             _ => {}
         }
         Ok(())
+    }
+
+    /// Opens the priority popup for the hovered task, preselecting its current priority.
+    fn begin_priority(&mut self) {
+        let Some(task) = self.hovered_task() else {
+            return;
+        };
+        self.mode = Mode::Priority {
+            task: task.id,
+            selected: PRIORITIES
+                .iter()
+                .position(|(_, priority)| *priority == task.priority)
+                .unwrap_or(0),
+        };
     }
 
     /// Returns true when the user requests quit.
@@ -497,6 +512,7 @@ impl App {
             Mode::Move { .. } => self.handle_move_key(key)?,
             Mode::Filter { .. } => self.handle_filter_key(key)?,
             Mode::Sort { .. } => self.handle_sort_key(key)?,
+            Mode::Priority { .. } => self.handle_priority_key(key)?,
         }
         Ok(false)
     }
@@ -1034,6 +1050,25 @@ impl App {
         Ok(())
     }
 
+    fn handle_priority_key(&mut self, key: KeyCode) -> Result<()> {
+        let Mode::Priority { task, selected } = &mut self.mode else {
+            return Ok(());
+        };
+        match key {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            // Arrows wrap around between P1 and No priority.
+            KeyCode::Up => *selected = (*selected + PRIORITIES.len() - 1) % PRIORITIES.len(),
+            KeyCode::Down => *selected = (*selected + 1) % PRIORITIES.len(),
+            KeyCode::Enter => {
+                db::set_priority(&self.db, *task, PRIORITIES[*selected].1)?;
+                self.mode = Mode::Browse;
+                self.refresh_tasks()?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn select_filter(&mut self, filter: usize) -> Result<()> {
         self.clear_task_view();
         self.selected_filter = filter;
@@ -1075,6 +1110,10 @@ impl App {
             }
             KeyCode::Char('d') => Action::Delete,
             KeyCode::Char('m') => Action::Move,
+            KeyCode::Char('!') => {
+                self.begin_priority();
+                return Ok(());
+            }
             KeyCode::Char(' ') => Action::ToggleCompletion,
             _ => return Ok(()),
         };
@@ -1141,6 +1180,12 @@ impl App {
                     db::duplicate_task(&self.db, id)?;
                     self.refresh_tasks()?;
                     self.message = "Duplicated task".into();
+                }
+            }
+            Action::SetPriority(priority) => {
+                if let Some(id) = self.hovered_task_id() {
+                    db::set_priority(&self.db, id, priority)?;
+                    self.refresh_tasks()?;
                 }
             }
             Action::ShowFilter(filter) => {
