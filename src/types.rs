@@ -17,6 +17,8 @@ pub struct Task {
     pub parent_title: Option<String>,
     pub subtask_count: usize,
     pub due_date: Option<NaiveDate>,
+    /// 1 (highest) to 3; `None` when unset.
+    pub priority: Option<u8>,
     /// UTC completion time; `None` for pending tasks and tasks completed before it was recorded.
     pub completed_at: Option<String>,
 }
@@ -44,6 +46,8 @@ pub enum Sort {
     CreatedAsc,
     /// Newest created first.
     CreatedDesc,
+    /// P1 first, unset last; ties keep the manual order.
+    Priority,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +58,7 @@ pub enum Action {
     Delete,
     Move,
     Duplicate,
+    SetPriority(Option<u8>),
     ShowFilter(usize),
     /// Opens Inbox with the given filter and focuses its navigation section.
     GoToInboxFilter(usize),
@@ -90,6 +95,8 @@ pub struct TaskDraft {
     pub title: String,
     pub description: String,
     pub due_date: String,
+    /// Not edited in the popup; carried so saves and duplicates keep it.
+    pub priority: Option<u8>,
     pub auto_date: Option<AutoDate>,
     pub ignored_dates: Vec<(TaskField, String)>,
     pub focus: TaskField,
@@ -138,6 +145,10 @@ pub enum Mode {
         selected: usize,
     },
     Sort {
+        selected: usize,
+    },
+    Priority {
+        task: i64,
         selected: usize,
     },
 }

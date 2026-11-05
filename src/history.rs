@@ -442,6 +442,7 @@ impl History {
             .and_then(|_| crate::db::migrate_completed_at(database))
             .and_then(|_| crate::db::migrate_sorts(database))
             .and_then(|_| crate::db::migrate_project_positions(database))
+            .and_then(|_| crate::db::migrate_priorities(database))
             .and_then(|_| crate::db::validate_hierarchy(database))
             .and_then(|_| {
                 self.git_text(&["merge", "--ff-only", "--no-edit", &plan.hash])

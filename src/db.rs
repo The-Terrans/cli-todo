@@ -44,6 +44,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     migrate_completed_at(&db)?;
     migrate_sorts(&db)?;
     migrate_project_positions(&db)?;
+    migrate_priorities(&db)?;
     validate_hierarchy(&db)?;
     Ok(db)
 }
@@ -78,6 +79,15 @@ pub fn migrate_subtasks(db: &Connection) -> Result<()> {
 pub fn migrate_due_dates(db: &Connection) -> Result<()> {
     if !has_column(db, "due_date")? {
         db.execute_batch("ALTER TABLE tasks ADD COLUMN due_date TEXT;")?;
+    }
+    Ok(())
+}
+
+pub fn migrate_priorities(db: &Connection) -> Result<()> {
+    if !has_column(db, "priority")? {
+        db.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN priority INTEGER CHECK(priority IN (1,2,3));",
+        )?;
     }
     Ok(())
 }
@@ -136,9 +146,10 @@ fn sort_list(project: Option<i64>, filter: Filter) -> (Option<i64>, Option<&'sta
     (None, Some(name))
 }
 
-const SORT_NAMES: [(Sort, &str); 2] = [
+const SORT_NAMES: [(Sort, &str); 3] = [
     (Sort::CreatedAsc, "created_asc"),
     (Sort::CreatedDesc, "created_desc"),
+    (Sort::Priority, "priority"),
 ];
 
 /// Returns the saved sort for `project`, or Inbox's `filter` when `None`; unknown names fall
@@ -209,6 +220,15 @@ fn save_due_date(db: &Connection, id: i64, input: &str) -> Result<()> {
     db.execute(
         "UPDATE tasks SET due_date=?1 WHERE id=?2",
         params![date, id],
+    )?;
+    Ok(())
+}
+
+/// Sets `priority` (1 to 3, or `None` to clear) on one task; subtasks keep their own.
+pub fn set_priority(db: &Connection, id: i64, priority: Option<u8>) -> Result<()> {
+    db.execute(
+        "UPDATE tasks SET priority=?1 WHERE id=?2",
+        params![priority, id],
     )?;
     Ok(())
 }
@@ -289,6 +309,7 @@ fn draft_from_task(task: Task, children: &mut HashMap<i64, Vec<Task>>, depth: us
             .due_date
             .map(|date| date.to_string())
             .unwrap_or_default(),
+        priority: task.priority,
         subtasks,
         depth,
         ..TaskDraft::default()
@@ -362,6 +383,7 @@ fn save_tree(
         )?;
     }
     save_due_date(&transaction, id, &draft.due_date)?;
+    set_priority(&transaction, id, draft.priority)?;
     let project =
         transaction.query_row("SELECT project_id FROM tasks WHERE id=?1", [id], |row| {
             row.get(0)
@@ -407,6 +429,7 @@ fn save_children(
         )?;
         let id = child.id.unwrap_or_else(|| db.last_insert_rowid());
         save_due_date(db, id, &child.draft.due_date)?;
+        set_priority(db, id, child.draft.priority)?;
         db.execute(
             &format!("UPDATE tasks SET parent_id=?1,{SET_DONE} WHERE id=?3"),
             params![parent, child.done, id],
@@ -506,8 +529,13 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
     } else {
         "NULL"
     };
+    let priority = if has_column(db, "priority")? {
+        "priority"
+    } else {
+        "NULL"
+    };
     let mut statement = db.prepare(&format!(
-        "SELECT id,title,done,project_id,{description},{parent},{subtask_count},{due_date},{completed_at},{parent_title} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY {position},id"
+        "SELECT id,title,done,project_id,{description},{parent},{subtask_count},{due_date},{completed_at},{parent_title},{priority} FROM tasks WHERE ?1 IS NULL OR done=?1 ORDER BY {position},id"
     ))?;
     let rows = statement.query_map([done], |row| {
         let date: Option<String> = row.get(7)?;
@@ -531,6 +559,7 @@ pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
             parent_title: row.get(9)?,
             subtask_count: row.get(6)?,
             due_date,
+            priority: row.get(10)?,
             completed_at: row.get(8)?,
         })
     })?;
@@ -615,7 +644,13 @@ fn compare_tasks(a: &Task, b: &Task, sort: Sort) -> Ordering {
         (false, Sort::Manual) => Ordering::Equal,
         (false, Sort::CreatedAsc) => a.id.cmp(&b.id),
         (false, Sort::CreatedDesc) => b.id.cmp(&a.id),
+        (false, Sort::Priority) => priority_rank(a).cmp(&priority_rank(b)),
     })
+}
+
+/// Unset priority ranks after P3.
+fn priority_rank(task: &Task) -> u8 {
+    task.priority.unwrap_or(u8::MAX)
 }
 
 pub fn move_task(db: &Connection, id: i64, project: Option<i64>) -> Result<()> {
