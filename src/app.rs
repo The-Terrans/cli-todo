@@ -545,9 +545,7 @@ impl App {
                 self.message = "Choose Inbox filters in the left panel".into();
             }
             KeyCode::Char('f') => {
-                self.mode = Mode::Filter {
-                    selected: self.selected_filter,
-                }
+                self.execute_action(Action::Filter)?;
             }
             KeyCode::Char('r') => {
                 self.mode = Mode::Sort {
@@ -1188,6 +1186,11 @@ impl App {
                     self.refresh_tasks()?;
                 }
             }
+            Action::Filter => {
+                self.mode = Mode::Filter {
+                    selected: self.selected_filter,
+                }
+            }
             Action::ShowFilter(filter) => {
                 if self.commits_focused {
                     self.focus_inbox()?;
@@ -1267,20 +1270,21 @@ impl App {
         };
         let query = query.trim().to_lowercase();
         let has_task = !self.commits_focused && self.current_task_id().is_some();
+        // Only projects have a filter popup; Inbox filters live in the left panel.
+        let has_filter = !self.commits_focused && self.current_project.is_some();
         ACTIONS
             .iter()
             .copied()
             .filter(|(label, action)| {
-                (has_task
-                    || matches!(
-                        action,
-                        Action::Add
-                            | Action::ShowFilter(_)
-                            | Action::GoToInboxFilter(_)
-                            | Action::ResetHistory
-                            | Action::Quit
-                    ))
-                    && label.to_lowercase().contains(&query)
+                let available = match action {
+                    Action::Filter => has_filter,
+                    Action::Add
+                    | Action::GoToInboxFilter(_)
+                    | Action::ResetHistory
+                    | Action::Quit => true,
+                    _ => has_task,
+                };
+                available && label.to_lowercase().contains(&query)
             })
             .collect()
     }

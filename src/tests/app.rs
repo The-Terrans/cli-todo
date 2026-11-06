@@ -1490,7 +1490,7 @@ fn palette_finds_and_opens_projects() -> Result<()> {
 #[test]
 fn palette_search_and_arrows_select_a_filter() -> Result<()> {
     let mut app = app()?;
-    search_actions(&mut app, " SHOW ")?;
+    search_actions(&mut app, " GO TO INBOX ")?;
     assert_eq!(app.palette_actions().len(), 4);
     for _ in 0..10 {
         app.handle_key(KeyCode::Down)?;
@@ -1502,12 +1502,12 @@ fn palette_search_and_arrows_select_a_filter() -> Result<()> {
     app.handle_key(KeyCode::Down)?;
     app.handle_key(KeyCode::Up)?;
     app.handle_key(KeyCode::Enter)?;
-    assert_eq!(app.selected_filter, 1);
-    assert!(!app.navigation_focused);
+    assert_eq!(app.selected_filter, ALL_FILTER);
+    assert!(app.navigation_focused);
     search_actions(&mut app, "")?;
     app.handle_key(KeyCode::Esc)?;
     assert!(matches!(app.mode, Mode::Browse));
-    assert!(!app.navigation_focused);
+    assert!(app.navigation_focused);
     Ok(())
 }
 
@@ -1550,10 +1550,6 @@ fn palette_handles_no_matches_and_requires_enter_to_quit() -> Result<()> {
             .collect::<Vec<_>>(),
         [
             Action::Add,
-            Action::ShowFilter(0),
-            Action::ShowFilter(1),
-            Action::ShowFilter(2),
-            Action::ShowFilter(3),
             Action::GoToInboxFilter(0),
             Action::GoToInboxFilter(1),
             Action::GoToInboxFilter(2),
@@ -2067,7 +2063,20 @@ fn filter_popup_only_filters_projects() -> Result<()> {
         "Inbox has no filter popup"
     );
     assert_eq!(app.message, "Choose Inbox filters in the left panel");
+    search_actions(&mut app, "filter")?;
+    assert!(app.palette_actions().is_empty(), "Inbox hides Filter tasks");
+    app.handle_key(KeyCode::Esc)?;
     app.handle_key(KeyCode::Char('2'))?;
+    search_actions(&mut app, "filter")?;
+    assert_eq!(app.palette_actions(), [("Filter tasks", Action::Filter)]);
+    app.handle_key(KeyCode::Enter)?;
+    assert!(matches!(
+        app.mode,
+        Mode::Filter {
+            selected: ALL_FILTER
+        }
+    ));
+    app.handle_key(KeyCode::Esc)?;
     app.handle_key(KeyCode::Char('f'))?;
     assert!(matches!(
         app.mode,
@@ -2268,8 +2277,6 @@ fn today_is_the_default_inbox_filter_and_projects_open_on_all() -> Result<()> {
     app.handle_key(KeyCode::Enter)?;
     assert!(app.message.is_empty());
     assert_eq!(titles(&app), ["due today", "overdue", "call bob"]);
-    search_actions(&mut app, "today's")?;
-    assert_eq!(app.palette_actions()[0].1, Action::ShowFilter(0));
     Ok(())
 }
 
