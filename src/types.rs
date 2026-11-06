@@ -59,6 +59,8 @@ pub enum Action {
     Move,
     Duplicate,
     SetPriority(Option<u8>),
+    /// Opens the project filter popup.
+    Filter,
     ShowFilter(usize),
     /// Opens Inbox with the given filter and focuses its navigation section.
     GoToInboxFilter(usize),
