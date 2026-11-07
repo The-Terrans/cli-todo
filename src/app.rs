@@ -1180,9 +1180,10 @@ impl App {
                     self.message = "Duplicated task".into();
                 }
             }
-            Action::SetPriority(priority) => {
+            Action::Priority => self.begin_priority(),
+            Action::ClearPriority => {
                 if let Some(id) = self.hovered_task_id() {
-                    db::set_priority(&self.db, id, priority)?;
+                    db::set_priority(&self.db, id, None)?;
                     self.refresh_tasks()?;
                 }
             }

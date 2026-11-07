@@ -60,7 +60,9 @@ pub enum Action {
     Delete,
     Move,
     Duplicate,
-    SetPriority(Option<u8>),
+    /// Opens the priority popup for the hovered task.
+    Priority,
+    ClearPriority,
     ClearDueDate,
     /// Opens the project filter popup.
     Filter,
