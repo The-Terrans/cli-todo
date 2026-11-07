@@ -2,11 +2,14 @@ use crate::types::{Action, Filter, Sort};
 
 pub const MAX_SUBTASK_DEPTH: usize = 64;
 
-pub const FILTERS: [(&str, Filter); 4] = [
+pub const FILTERS: [(&str, Filter); 7] = [
     ("Today", Filter::Today),
     ("All", Filter::All),
     ("Pending", Filter::Pending),
     ("Completed", Filter::Completed),
+    ("P1", Filter::Priority(1)),
+    ("P2", Filter::Priority(2)),
+    ("P3", Filter::Priority(3)),
 ];
 
 /// Index of the All filter, used when a task must be visible regardless of status or date.
@@ -54,7 +57,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  d             Delete all completed tasks (Inbox Completed)",
     "  m             Move task to a project or No project",
     "  !             Set task priority: P1/P2/P3/No priority",
-    "  f             Filter a project's tasks: Today/All/Pending/Completed",
+    "  f             Filter a project's tasks: Today/All/Pending/Completed/P1-P3",
     "  r             Sort pending tasks per project / Inbox filter; saved",
     "  Alt+J / Alt+K Move selected pending task down/up (Manual order)",
     "  Alt+Down/Up   Same as Alt+J / Alt+K",
@@ -109,7 +112,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  Tab/Shift+Tab Cycles panel focus in browsing; popup fields in editor",
 ];
 
-pub(crate) const ACTIONS: [(&str, Action); 17] = [
+pub(crate) const ACTIONS: [(&str, Action); 20] = [
     ("Add task", Action::Add),
     ("Edit selected task", Action::Edit),
     ("Complete / reopen selected task", Action::ToggleCompletion),
@@ -125,6 +128,9 @@ pub(crate) const ACTIONS: [(&str, Action); 17] = [
     ("Go to Inbox: All", Action::GoToInboxFilter(ALL_FILTER)),
     ("Go to Inbox: Pending", Action::GoToInboxFilter(2)),
     ("Go to Inbox: Completed", Action::GoToInboxFilter(3)),
+    ("Go to Inbox: P1", Action::GoToInboxFilter(4)),
+    ("Go to Inbox: P2", Action::GoToInboxFilter(5)),
+    ("Go to Inbox: P3", Action::GoToInboxFilter(6)),
     ("Reset todo history", Action::ResetHistory),
     ("Quit", Action::Quit),
 ];

@@ -133,15 +133,16 @@ pub fn migrate_sorts(db: &Connection) -> Result<()> {
 }
 
 /// A project shares one sort across its filters; each Inbox filter has its own.
-fn sort_list(project: Option<i64>, filter: Filter) -> (Option<i64>, Option<&'static str>) {
+fn sort_list(project: Option<i64>, filter: Filter) -> (Option<i64>, Option<String>) {
     if project.is_some() {
         return (project, None);
     }
     let name = match filter {
-        Filter::Today => "today",
-        Filter::All => "all",
-        Filter::Pending => "pending",
-        Filter::Completed => "completed",
+        Filter::Today => "today".into(),
+        Filter::All => "all".into(),
+        Filter::Pending => "pending".into(),
+        Filter::Completed => "completed".into(),
+        Filter::Priority(priority) => format!("p{priority}"),
     };
     (None, Some(name))
 }
@@ -496,7 +497,7 @@ pub fn create_task(db: &Connection, title: &str, project: Option<i64>) -> Result
 pub fn list_tasks(db: &Connection, filter: Filter) -> Result<Vec<Task>> {
     let done = match filter {
         Filter::All => None,
-        Filter::Today | Filter::Pending => Some(false),
+        Filter::Today | Filter::Pending | Filter::Priority(_) => Some(false),
         Filter::Completed => Some(true),
     };
     // Old Git snapshots predate descriptions and remain readable without migration.
@@ -600,7 +601,7 @@ fn set_task_done(db: &Connection, id: i64, done: bool) -> Result<()> {
 }
 
 /// Lists top-level tasks in `project`, or all top-level tasks (any project or none) when `None`.
-/// Today instead lists every unfinished task due by today, subtasks included.
+/// Today and priority filters instead list every matching unfinished task, subtasks included.
 /// Pending tasks come first in `sort` order, then completed tasks, most recently completed first.
 pub fn list_tasks_in(
     db: &Connection,
@@ -612,10 +613,10 @@ pub fn list_tasks_in(
     let mut tasks: Vec<_> = list_tasks(db, filter)?
         .into_iter()
         .filter(|task| {
-            let listed = if filter == Filter::Today {
-                task.due_date.is_some_and(|date| date <= today)
-            } else {
-                task.parent_id.is_none()
+            let listed = match filter {
+                Filter::Today => task.due_date.is_some_and(|date| date <= today),
+                Filter::Priority(priority) => task.priority == Some(priority),
+                _ => task.parent_id.is_none(),
             };
             listed && project.is_none_or(|id| task.project_id == Some(id))
         })
