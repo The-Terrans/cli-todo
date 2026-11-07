@@ -2413,7 +2413,7 @@ fn p_pulls_and_shift_p_pushes_from_every_browsing_panel() -> Result<()> {
 }
 
 #[test]
-fn bang_sets_priority_of_the_hovered_task_or_subtask_and_palette_sets_it_too() -> Result<()> {
+fn bang_and_palette_open_priority_popup_for_the_hovered_task_or_subtask() -> Result<()> {
     let mut app = app()?;
     search_actions(&mut app, "set priority")?;
     assert!(app.palette_actions().is_empty(), "hidden without a task");
@@ -2468,8 +2468,13 @@ fn bang_sets_priority_of_the_hovered_task_or_subtask_and_palette_sets_it_too() -
     assert_eq!(view.children[0].priority, Some(1));
     assert_eq!(view.task.priority, None);
 
-    search_actions(&mut app, "set priority: p3")?;
+    search_actions(&mut app, "set priority")?;
     app.handle_key(KeyCode::Enter)?;
+    assert!(
+        matches!(app.mode, Mode::Priority { selected: 0, .. }),
+        "the palette opens the popup on the current priority"
+    );
+    keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter])?;
     assert_eq!(
         app.task_view.as_ref().unwrap().children[0].priority,
         Some(3)
