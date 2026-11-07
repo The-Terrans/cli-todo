@@ -1156,3 +1156,47 @@ fn inbox_lists_every_project_with_tags_and_filters() -> Result<()> {
     assert_eq!(added.project_id, None);
     Ok(())
 }
+
+#[test]
+fn subtasks_show_the_same_dim_description_preview_as_tasks() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    let child = |title: &str, description: &str| crate::types::SubtaskDraft {
+        id: None,
+        done: false,
+        draft: TaskDraft {
+            title: title.into(),
+            description: description.into(),
+            ..TaskDraft::default()
+        },
+    };
+    db::save_task_tree(
+        &db,
+        None,
+        &TaskDraft {
+            title: "parent".into(),
+            subtasks: vec![child("noted", "\n child notes \nmore"), child("plain", "")],
+            ..TaskDraft::default()
+        },
+        None,
+    )?;
+    let mut app = App::new_showing_all(db)?;
+    for key in [KeyCode::Char('0'), KeyCode::Enter, KeyCode::Right] {
+        app.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE))?;
+    }
+    let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let buffer = terminal.backend().buffer();
+    let row = |y: u16| -> String { (0..100).map(|x| buffer[(x, y)].symbol()).collect() };
+    let noted = (0..25).find(|&y| row(y).contains("[ ] noted")).unwrap();
+    assert!(row(noted + 1).contains("    child notes …"));
+    assert!(
+        row(noted + 2).contains("[ ] plain"),
+        "blank descriptions add no row"
+    );
+    let x = row(noted + 1).find("child").unwrap() as u16;
+    let preview = &buffer[(x, noted + 1)];
+    assert_eq!(preview.fg, Color::DarkGray);
+    assert!(preview.modifier.contains(Modifier::DIM));
+    assert_eq!(selection_rows(buffer, 26), 2, "selection covers both rows");
+    Ok(())
+}

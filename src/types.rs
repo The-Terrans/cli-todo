@@ -35,6 +35,8 @@ pub enum Filter {
     All,
     Pending,
     Completed,
+    /// Unfinished tasks and subtasks with this priority (1 to 3).
+    Priority(u8),
 }
 
 /// Order of pending tasks in the main list; completed tasks always follow, newest first.

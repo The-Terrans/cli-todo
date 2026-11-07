@@ -847,3 +847,48 @@ fn priorities_persist_sort_p1_first_and_survive_edits_and_duplicates() -> Result
     assert_eq!(load_sort(&db, None, Filter::All)?, Sort::Priority);
     Ok(())
 }
+
+#[test]
+fn priority_filters_list_unfinished_tasks_and_subtasks_with_their_own_sort() -> Result<()> {
+    let db = open(Path::new(":memory:"))?;
+    save_project(&db, None, "Work")?;
+    let project = db.last_insert_rowid();
+    save_task_tree(&db, None, &nested_draft(), Some(project))?;
+    for title in ["inbox p1", "done p1", "inbox p2"] {
+        create_task(&db, title, None)?;
+    }
+    let tasks = list_tasks(&db, Filter::All)?;
+    let id = |title: &str| tasks.iter().find(|task| task.title == title).unwrap().id;
+    for (title, priority) in [
+        ("child", 1),
+        ("inbox p1", 1),
+        ("done p1", 1),
+        ("inbox p2", 2),
+    ] {
+        set_priority(&db, id(title), Some(priority))?;
+    }
+    toggle_task(&db, id("done p1"))?;
+    let listed = |project| -> Result<Vec<(String, Option<String>)>> {
+        Ok(
+            list_tasks_in(&db, Filter::Priority(1), project, Sort::Manual)?
+                .into_iter()
+                .map(|task| (task.title, task.parent_title))
+                .collect(),
+        )
+    };
+    let child = ("child".to_string(), Some("parent".to_string()));
+    assert_eq!(listed(None)?, [child.clone(), ("inbox p1".into(), None)]);
+    assert_eq!(listed(Some(project))?, [child]);
+
+    save_sort(&db, None, Filter::Priority(1), Sort::CreatedDesc)?;
+    assert_eq!(
+        load_sort(&db, None, Filter::Priority(1))?,
+        Sort::CreatedDesc
+    );
+    assert_eq!(
+        load_sort(&db, None, Filter::Priority(2))?,
+        Sort::Manual,
+        "each priority filter keeps its own sort"
+    );
+    Ok(())
+}

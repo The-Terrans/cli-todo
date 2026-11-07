@@ -1491,11 +1491,11 @@ fn palette_finds_and_opens_projects() -> Result<()> {
 fn palette_search_and_arrows_select_a_filter() -> Result<()> {
     let mut app = app()?;
     search_actions(&mut app, " GO TO INBOX ")?;
-    assert_eq!(app.palette_actions().len(), 4);
+    assert_eq!(app.palette_actions().len(), 7);
     for _ in 0..10 {
         app.handle_key(KeyCode::Down)?;
     }
-    assert!(matches!(app.mode, Mode::Palette { selected: 3, .. }));
+    assert!(matches!(app.mode, Mode::Palette { selected: 6, .. }));
     app.handle_key(KeyCode::Backspace)?;
     assert!(matches!(app.mode, Mode::Palette { selected: 0, .. }));
     app.handle_key(KeyCode::Down)?;
@@ -1554,6 +1554,9 @@ fn palette_handles_no_matches_and_requires_enter_to_quit() -> Result<()> {
             Action::GoToInboxFilter(1),
             Action::GoToInboxFilter(2),
             Action::GoToInboxFilter(3),
+            Action::GoToInboxFilter(4),
+            Action::GoToInboxFilter(5),
+            Action::GoToInboxFilter(6),
             Action::ResetHistory,
             Action::Quit
         ]
@@ -1723,7 +1726,7 @@ fn navigation_wraps_filters_and_clamps_task_selection() -> Result<()> {
     assert_eq!(app.selected_filter, 0);
     assert!(app.tasks.is_empty(), "undated tasks are not due today");
     app.handle_key(KeyCode::Up)?;
-    assert_eq!(app.selected_filter, 3);
+    assert_eq!(app.selected_filter, 6);
     assert!(app.tasks.is_empty());
     app.handle_key(KeyCode::Down)?;
     app.handle_key(KeyCode::Down)?;
@@ -2086,8 +2089,8 @@ fn filter_popup_only_filters_projects() -> Result<()> {
     ));
     keys(&mut app, &[KeyCode::Up; 3])?;
     assert!(matches!(app.mode, Mode::Filter { selected: 0 }));
-    keys(&mut app, &[KeyCode::Down; 5])?;
-    assert!(matches!(app.mode, Mode::Filter { selected: 3 }));
+    keys(&mut app, &[KeyCode::Down; 8])?;
+    assert!(matches!(app.mode, Mode::Filter { selected: 6 }));
     app.handle_key(KeyCode::Esc)?;
     assert_eq!(app.selected_filter, ALL_FILTER, "Esc keeps the filter");
     assert_eq!(titles(&app), ["pending work", "done work"]);
@@ -2471,5 +2474,40 @@ fn bang_sets_priority_of_the_hovered_task_or_subtask_and_palette_sets_it_too() -
         app.task_view.as_ref().unwrap().children[0].priority,
         Some(3)
     );
+    Ok(())
+}
+
+#[test]
+fn inbox_priority_filters_list_unfinished_matches_and_explain_hidden_new_tasks() -> Result<()> {
+    let mut app = app()?;
+    for title in ["urgent", "unset", "done urgent", "minor"] {
+        db::save_task(&app.db, None, title)?;
+    }
+    for (id, priority) in [(1, 1), (3, 1), (4, 3)] {
+        db::set_priority(&app.db, id, Some(priority))?;
+    }
+    db::toggle_task(&app.db, 3)?;
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    app.handle_key(KeyCode::Char('1'))?;
+    app.select_filter(3)?;
+    app.handle_key(KeyCode::Down)?;
+    assert_eq!(FILTERS[app.selected_filter], ("P1", Filter::Priority(1)));
+    assert_eq!(titles(&app), ["urgent"]);
+    create_task(&mut app, "new")?;
+    assert_eq!(app.message, "Added to All — no priority");
+    assert_eq!(titles(&app), ["urgent"]);
+    keys(&mut app, &[KeyCode::Down, KeyCode::Down])?;
+    assert_eq!(titles(&app), ["minor"]);
+    app.handle_key(KeyCode::Down)?;
+    assert_eq!(app.selected_filter, 0, "Down wraps from P3 to Today");
+
+    app.handle_key(KeyCode::Char('3'))?;
+    search_actions(&mut app, "go to inbox: p2")?;
+    assert_eq!(app.palette_actions().len(), 1);
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(FILTERS[app.selected_filter].1, Filter::Priority(2));
+    assert!(app.navigation_focused && !app.commits_focused);
+    assert!(app.tasks.is_empty());
     Ok(())
 }

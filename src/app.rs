@@ -1587,12 +1587,12 @@ impl App {
         let added_child = self.new_task_parent.take().is_some();
         let listed = self.tasks.len();
         self.refresh_tasks()?;
-        if id.is_none()
-            && !added_child
-            && FILTERS[self.selected_filter].1 == Filter::Today
-            && self.tasks.len() == listed
-        {
-            self.message = "Added to All — not due today".into();
+        if id.is_none() && !added_child && self.tasks.len() == listed {
+            match FILTERS[self.selected_filter].1 {
+                Filter::Today => self.message = "Added to All — not due today".into(),
+                Filter::Priority(_) => self.message = "Added to All — no priority".into(),
+                _ => {}
+            }
         }
         if added_child {
             if let Some(view) = &mut self.task_view {
