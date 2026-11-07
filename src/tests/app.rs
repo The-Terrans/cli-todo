@@ -2478,6 +2478,37 @@ fn bang_sets_priority_of_the_hovered_task_or_subtask_and_palette_sets_it_too() -
 }
 
 #[test]
+fn palette_clears_due_date_and_priority_of_the_hovered_task() -> Result<()> {
+    let mut app = app()?;
+    search_actions(&mut app, "clear")?;
+    assert!(app.palette_actions().is_empty(), "hidden without a task");
+    app.handle_key(KeyCode::Esc)?;
+    db::save_task_tree(
+        &app.db,
+        None,
+        &TaskDraft {
+            title: "task".into(),
+            due_date: "2030-01-01".into(),
+            priority: Some(1),
+            ..TaskDraft::default()
+        },
+        None,
+    )?;
+    app.refresh_tasks()?;
+    app.handle_key(KeyCode::Char('0'))?;
+
+    search_actions(&mut app, "clear due date")?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[0].due_date, None);
+    assert_eq!(app.tasks[0].priority, Some(1), "priority is untouched");
+
+    search_actions(&mut app, "clear priority")?;
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[0].priority, None);
+    Ok(())
+}
+
+#[test]
 fn inbox_priority_filters_list_unfinished_matches_and_explain_hidden_new_tasks() -> Result<()> {
     let mut app = app()?;
     for title in ["urgent", "unset", "done urgent", "minor"] {

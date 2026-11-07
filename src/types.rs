@@ -61,6 +61,7 @@ pub enum Action {
     Move,
     Duplicate,
     SetPriority(Option<u8>),
+    ClearDueDate,
     /// Opens the project filter popup.
     Filter,
     ShowFilter(usize),
