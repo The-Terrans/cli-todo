@@ -225,6 +225,11 @@ fn save_due_date(db: &Connection, id: i64, input: &str) -> Result<()> {
     Ok(())
 }
 
+/// Removes the due date from one task; subtasks keep their own.
+pub fn clear_due_date(db: &Connection, id: i64) -> Result<()> {
+    save_due_date(db, id, "")
+}
+
 /// Sets `priority` (1 to 3, or `None` to clear) on one task; subtasks keep their own.
 pub fn set_priority(db: &Connection, id: i64, priority: Option<u8>) -> Result<()> {
     db.execute(

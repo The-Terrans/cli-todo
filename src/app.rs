@@ -1186,6 +1186,12 @@ impl App {
                     self.refresh_tasks()?;
                 }
             }
+            Action::ClearDueDate => {
+                if let Some(id) = self.hovered_task_id() {
+                    db::clear_due_date(&self.db, id)?;
+                    self.refresh_tasks()?;
+                }
+            }
             Action::Filter => {
                 self.mode = Mode::Filter {
                     selected: self.selected_filter,
