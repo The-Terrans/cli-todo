@@ -402,7 +402,9 @@ fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
                     style,
                     today,
                 );
-                ListItem::new(title)
+                let mut lines = vec![title];
+                lines.extend(description_preview(&child.description));
+                ListItem::new(lines)
             })
             .collect();
         draw_task_list(
@@ -414,6 +416,22 @@ fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
             focused.then_some(view.selected_child),
         );
     }
+}
+
+/// Dim first non-blank description line, with ` …` when more lines follow; `None` when blank.
+fn description_preview(description: &str) -> Option<Line<'static>> {
+    let mut lines = description
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let preview = lines.next()?;
+    let suffix = if lines.next().is_some() { " …" } else { "" };
+    Some(Line::styled(
+        format!("    {preview}{suffix}"),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
+    ))
 }
 
 fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
@@ -466,24 +484,7 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
             );
         }
         let mut lines = vec![title];
-        let mut description = task
-            .description
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty());
-        if let Some(preview) = description.next() {
-            let suffix = if description.next().is_some() {
-                " …"
-            } else {
-                ""
-            };
-            lines.push(Line::styled(
-                format!("    {preview}{suffix}"),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            ));
-        }
+        lines.extend(description_preview(&task.description));
         ListItem::new(lines)
     });
     let mut title = project_title(app, "─[0]─Tasks", app.current_project);
