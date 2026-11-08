@@ -10,6 +10,7 @@ use crate::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rusqlite::Connection;
+use std::cmp::Ordering;
 use std::ops::Range;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
@@ -408,10 +409,6 @@ impl App {
         }
         let (tasks, selected) = match &self.task_view {
             Some(view) if view.focus != TaskPane::Subtasks => return Ok(()),
-            _ if self.sort != Sort::Manual => {
-                self.message = "Press r and choose Manual order to reorder tasks".into();
-                return Ok(());
-            }
             Some(view) => (&view.children, view.selected_child),
             None => (&self.tasks, self.selected_task),
         };
@@ -432,6 +429,16 @@ impl App {
         // Today mixes levels; swapping across them would reorder subtasks among their siblings.
         if task.parent_id != neighbour.parent_id {
             self.message = "Reorder subtasks inside their parent task".into();
+            return Ok(());
+        }
+        // Swapping positions only shows when the sort ties both tasks and falls back to manual order.
+        if db::compare_tasks(task, neighbour, self.sort) != Ordering::Equal {
+            self.message = if self.sort == Sort::Priority {
+                "Priority order only reorders tasks of the same priority"
+            } else {
+                "Press r and choose Manual order to reorder tasks"
+            }
+            .into();
             return Ok(());
         }
         db::swap_tasks(&self.db, task.id, neighbour.id)?;

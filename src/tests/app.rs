@@ -2182,6 +2182,57 @@ fn sort_popup_orders_pending_tasks_and_limits_reordering_to_manual_order() -> Re
 }
 
 #[test]
+fn priority_order_reorders_tasks_within_their_priority() -> Result<()> {
+    let mut app = app()?;
+    for title in ["a", "b", "c", "d"] {
+        db::save_task(&app.db, None, title)?;
+    }
+    for (id, priority) in [(1, 1), (3, 1), (4, 2)] {
+        db::set_priority(&app.db, id, Some(priority))?;
+    }
+    app.refresh_tasks()?;
+    app.handle_key(KeyCode::Char('0'))?;
+    let titles =
+        |app: &App| -> Vec<String> { app.tasks.iter().map(|task| task.title.clone()).collect() };
+    let alt_j =
+        |app: &mut App| app.handle_key_event(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT));
+    keys(
+        &mut app,
+        &[
+            KeyCode::Char('r'),
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Enter,
+        ],
+    )?;
+    assert_eq!(app.sort, Sort::Priority);
+    assert_eq!(titles(&app), ["a", "c", "d", "b"]);
+    alt_j(&mut app)?;
+    assert_eq!(titles(&app), ["c", "a", "d", "b"]);
+    assert_eq!(app.selected_task, 1);
+    alt_j(&mut app)?;
+    assert_eq!(
+        app.message,
+        "Priority order only reorders tasks of the same priority"
+    );
+    assert_eq!(titles(&app), ["c", "a", "d", "b"]);
+    keys(
+        &mut app,
+        &[
+            KeyCode::Char('r'),
+            KeyCode::Up,
+            KeyCode::Up,
+            KeyCode::Up,
+            KeyCode::Enter,
+        ],
+    )?;
+    assert_eq!(app.sort, Sort::Manual);
+    assert_eq!(titles(&app), ["c", "b", "a", "d"], "the swap carries over");
+    Ok(())
+}
+
+#[test]
 fn each_list_keeps_its_own_sort() -> Result<()> {
     let mut app = app()?;
     for name in ["Work", "Home"] {
