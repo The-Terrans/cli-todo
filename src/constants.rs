@@ -59,7 +59,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  !             Set task priority: P1/P2/P3/No priority",
     "  f             Filter a project's tasks: Today/All/Pending/Completed/P1-P3",
     "  r             Sort pending tasks per project / Inbox filter; saved",
-    "  Alt+J / Alt+K Move selected pending task down/up (Manual order)",
+    "  Alt+J / Alt+K Move selected pending task down/up (Manual order or same priority)",
     "  Alt+Down/Up   Same as Alt+J / Alt+K",
     "  Shift+D       Nuke all data, local commits and remote settings",
     "  Shift+E       Edit hovered task in VISUAL/EDITOR; saves on exit",

@@ -643,7 +643,7 @@ pub fn subtasks_of(tasks: &[Task], parent: i64, sort: Sort) -> Vec<Task> {
 
 /// Pending tasks in `sort` order, then completed tasks, most recently completed first.
 /// Meant for stable sorts: ties keep the manual order. Ids grow with creation, so they order by creation.
-fn compare_tasks(a: &Task, b: &Task, sort: Sort) -> Ordering {
+pub fn compare_tasks(a: &Task, b: &Task, sort: Sort) -> Ordering {
     a.done.cmp(&b.done).then_with(|| match (a.done, sort) {
         // `None` sorts before `Some`, so reversing puts unrecorded completions last.
         (true, _) => b.completed_at.cmp(&a.completed_at),
