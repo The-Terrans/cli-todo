@@ -892,3 +892,74 @@ fn priority_filters_list_unfinished_tasks_and_subtasks_with_their_own_sort() -> 
     );
     Ok(())
 }
+
+#[test]
+fn autoincrement_migration_keeps_rows_and_never_reuses_ids() -> Result<()> {
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let path = env::temp_dir().join(format!("cli-todo-autoincrement-{stamp}.sqlite3"));
+    let db = open(&path)?;
+    // Recreate the pre-AUTOINCREMENT schema with a project, task, subtask, and saved sort.
+    let old = |table: &str| -> Result<String> {
+        let sql: String = db.query_row(
+            "SELECT sql FROM sqlite_master WHERE name=?1",
+            [table],
+            |row| row.get(0),
+        )?;
+        Ok(sql.replace(" AUTOINCREMENT", ""))
+    };
+    let (projects, tasks) = (old("projects")?, old("tasks")?);
+    db.execute_batch(&format!(
+        "PRAGMA foreign_keys = OFF;
+        DROP TABLE tasks; DROP TABLE projects; DELETE FROM sqlite_sequence;
+        {projects}; {tasks};
+        PRAGMA foreign_keys = ON;"
+    ))?;
+    save_project(&db, None, "Work")?;
+    let project = db.last_insert_rowid();
+    save_task_tree(&db, None, &nested_draft(), Some(project))?;
+    save_sort(&db, Some(project), Filter::All, Sort::CreatedDesc)?;
+    let before = list_tasks(&db, Filter::All)?;
+    drop(db);
+
+    let db = open(&path)?;
+    let schema: String = db.query_row(
+        "SELECT group_concat(sql) FROM sqlite_master WHERE name IN ('tasks','projects')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(schema.matches("AUTOINCREMENT").count(), 2);
+    assert!(list_tasks(&db, Filter::All)? == before);
+    assert_eq!(list_projects(&db)?[0].id, project);
+    assert_eq!(
+        load_sort(&db, Some(project), Filter::All)?,
+        Sort::CreatedDesc
+    );
+    let index: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='tasks_parent_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert!(index);
+
+    let newest = before.iter().map(|task| task.id).max().unwrap_or_default();
+    delete_task(&db, newest)?;
+    save_task_tree(
+        &db,
+        None,
+        &TaskDraft {
+            title: "next".into(),
+            ..TaskDraft::default()
+        },
+        None,
+    )?;
+    assert_eq!(db.last_insert_rowid(), newest + 1);
+    delete_project(&db, project)?;
+    save_project(&db, None, "Home")?;
+    assert_eq!(db.last_insert_rowid(), project + 1);
+    drop(db);
+    open(&path)?;
+    fs::remove_file(path)?;
+    Ok(())
+}

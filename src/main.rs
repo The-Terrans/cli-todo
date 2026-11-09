@@ -1,4 +1,5 @@
 mod app;
+mod cli;
 mod clipboard;
 mod constants;
 mod dates;
@@ -24,6 +25,14 @@ fn main() -> Result<()> {
     let directory = data_directory()?;
     fs::create_dir_all(&directory)?;
     let db = db::open(&directory.join("tasks.sqlite3"))?;
+    let args: Vec<String> = env::args().skip(1).collect();
+    if !args.is_empty() {
+        if let Err(error) = cli::run(&db, &args, &mut std::io::stdout()) {
+            eprintln!("cli-todo: {error}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     let mut app = App::new(db)?;
     run(&mut app)
 }
