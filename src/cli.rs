@@ -16,7 +16,8 @@ pub const USAGE: &str = "Usage:
   cli-todo project rename <name> <new>  Rename a project
   cli-todo project delete <name> [--force]
                                         Delete a project; --force also deletes its tasks
-  cli-todo help                         Show this help";
+  cli-todo help                         Show this help
+  cli-todo -v, --version                Show the version";
 
 /// Runs one non-interactive command; `args` excludes the program name.
 pub fn run(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
@@ -28,6 +29,7 @@ pub fn run(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()>
         "delete" => delete(db, rest, out),
         "project" => project(db, rest, out),
         "help" | "-h" | "--help" => Ok(writeln!(out, "{USAGE}")?),
+        "-v" | "--version" => Ok(writeln!(out, "cli-todo {}", env!("CARGO_PKG_VERSION"))?),
         other => Err(format!("Unknown command '{other}'. Run 'cli-todo help' for usage").into()),
     }
 }

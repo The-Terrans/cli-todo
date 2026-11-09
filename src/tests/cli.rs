@@ -114,5 +114,8 @@ fn rejects_bad_input_with_guidance() -> Result<()> {
     );
     assert_eq!(error(&db, "done 1 2"), "Usage: cli-todo done <id>");
     assert!(cli(&db, "help")?.starts_with("Usage:"));
+    let version = format!("cli-todo {}\n", env!("CARGO_PKG_VERSION"));
+    assert_eq!(cli(&db, "-v")?, version);
+    assert_eq!(cli(&db, "--version")?, version);
     Ok(())
 }
