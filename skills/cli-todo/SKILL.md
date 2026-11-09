@@ -5,7 +5,17 @@ description: Manages the user's todo list with the `cli-todo` command - add, lis
 
 # cli-todo
 
+`cli-todo` is a todo app backed by SQLite. With arguments it runs one command, prints the result, and exits. Without arguments it opens an interactive UI: **never run it without arguments.**
+
 Run `cli-todo help` for the exact usage of the installed version.
+
+## Check installation first
+
+```bash
+timeout 5 cli-todo -v    # expect: cli-todo 0.25.0 (or later)
+```
+
+If the output is not `cli-todo <version>`, stop using this skill and tell the user to install or update cli-todo. Versions without `-v` ignore arguments and open the interactive UI, which fails or hangs without the timeout. On macOS without GNU `timeout`, use your tool's command timeout instead.
 
 ## Commands
 
