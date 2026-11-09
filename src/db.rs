@@ -20,11 +20,11 @@ pub fn open(path: &Path) -> Result<Connection> {
     db.execute_batch(
         "PRAGMA foreign_keys = ON;
         CREATE TABLE IF NOT EXISTS projects (
-            id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE CHECK(length(trim(name)) > 0)
         );
         CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL CHECK(length(trim(title)) > 0),
             done INTEGER NOT NULL DEFAULT 0 CHECK(done IN (0,1))
         );",
@@ -37,6 +37,8 @@ pub fn open(path: &Path) -> Result<Connection> {
         db.execute_batch("ALTER TABLE tasks ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE;")?;
     }
     drop(columns);
+    migrate_autoincrement(&db, "projects")?;
+    migrate_autoincrement(&db, "tasks")?;
     migrate_description(&db)?;
     migrate_subtasks(&db)?;
     migrate_due_dates(&db)?;
@@ -59,6 +61,46 @@ fn table_has_column(db: &Connection, table: &str, column: &str) -> Result<bool> 
         [table, column],
         |row| row.get(0),
     )?)
+}
+
+/// Rebuilds `table` with AUTOINCREMENT, keeping its ids, so ids of deleted rows are never reused.
+/// Runs before `migrate_subtasks`, which recreates the parent index dropped with the old table.
+pub fn migrate_autoincrement(db: &Connection, table: &str) -> Result<()> {
+    let sql: String = db.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+        [table],
+        |row| row.get(0),
+    )?;
+    if sql.contains("AUTOINCREMENT") {
+        return Ok(());
+    }
+    // Columns start at the first parenthesis; everything before it is `CREATE TABLE <name>`.
+    let columns = sql
+        .find('(')
+        .map(|start| &sql[start..])
+        .filter(|columns| columns.contains("id INTEGER PRIMARY KEY"))
+        .ok_or_else(|| format!("Unexpected {table} schema; cannot add AUTOINCREMENT"))?;
+    let rebuilt = format!(
+        "CREATE TABLE {table}_rebuild {}",
+        columns.replacen(
+            "id INTEGER PRIMARY KEY",
+            "id INTEGER PRIMARY KEY AUTOINCREMENT",
+            1
+        )
+    );
+    // Dropping the old table with foreign keys on would cascade-delete referencing rows.
+    // The pragma is ignored inside a transaction, so it wraps BEGIN/COMMIT.
+    db.execute_batch(&format!(
+        "PRAGMA foreign_keys = OFF;
+        BEGIN;
+        {rebuilt};
+        INSERT INTO {table}_rebuild SELECT * FROM {table};
+        DROP TABLE {table};
+        ALTER TABLE {table}_rebuild RENAME TO {table};
+        COMMIT;
+        PRAGMA foreign_keys = ON;"
+    ))?;
+    Ok(())
 }
 
 pub fn migrate_description(db: &Connection) -> Result<()> {
