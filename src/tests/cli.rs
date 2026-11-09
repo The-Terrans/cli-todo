@@ -103,9 +103,9 @@ fn rejects_bad_input_with_guidance() -> Result<()> {
     );
     assert_eq!(
         error(&db, "add"),
-        "Usage: cli-todo add <title> [-p <project>]"
+        "Usage: cli-todo add <title> [-p <project> | --parent <id>]"
     );
-    assert_eq!(error(&db, "add x -p"), "-p needs a project name");
+    assert_eq!(error(&db, "add x -p"), "-p needs a value");
     assert_eq!(error(&db, "list --done"), "Unknown option '--done'");
     assert_eq!(error(&db, "done abc"), "'abc' is not a task id");
     assert_eq!(
@@ -117,5 +117,53 @@ fn rejects_bad_input_with_guidance() -> Result<()> {
     let version = format!("cli-todo {}\n", env!("CARGO_PKG_VERSION"));
     assert_eq!(cli(&db, "-v")?, version);
     assert_eq!(cli(&db, "--version")?, version);
+    Ok(())
+}
+
+#[test]
+fn adds_and_lists_subtasks_one_level_at_a_time() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    cli(&db, "project add Work")?;
+    cli(&db, "add Ship -p Work")?;
+    assert_eq!(
+        cli(&db, "add Write docs --parent 1")?,
+        "Added subtask 2 to Ship: Write docs\n"
+    );
+    cli(&db, "add Tests --parent 1")?;
+    cli(&db, "add Unit --parent 3")?;
+    assert_eq!(cli(&db, "list")?, "   1  [ ] Ship  +2 subtasks  (Work)\n");
+    assert_eq!(
+        cli(&db, "list --parent 1")?,
+        "   2  [ ] Write docs\n   3  [ ] Tests  +1 subtask\n"
+    );
+    assert_eq!(cli(&db, "list --parent 3")?, "   4  [ ] Unit\n");
+    assert_eq!(cli(&db, "list -p Work")?, "   1  [ ] Ship  +2 subtasks\n");
+    cli(&db, "done 2")?;
+    assert_eq!(
+        cli(&db, "list --parent 1")?,
+        "   3  [ ] Tests  +1 subtask\n"
+    );
+    assert_eq!(
+        cli(&db, "list --parent 1 --all")?,
+        "   3  [ ] Tests  +1 subtask\n   2  [x] Write docs\n"
+    );
+    assert_eq!(cli(&db, "list --parent 4")?, "No tasks\n");
+    // Subtasks inherit the parent's project.
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM tasks WHERE project_id=1", [], |row| {
+            row.get::<_, i64>(0)
+        })?,
+        4
+    );
+    assert_eq!(
+        error(&db, "add x --parent 1 -p Work"),
+        "Use -p or --parent, not both; subtasks stay in their parent's project"
+    );
+    assert_eq!(
+        error(&db, "list --parent 9"),
+        "No task with id 9. Run 'cli-todo list --all'"
+    );
+    assert_eq!(error(&db, "add x --parent"), "--parent needs a value");
+    assert_eq!(error(&db, "done 1 -p Work"), "Unknown option '-p'");
     Ok(())
 }

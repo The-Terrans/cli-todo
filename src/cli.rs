@@ -3,12 +3,14 @@ use crate::{
     types::{Filter, Project, Result, TaskDraft},
 };
 use rusqlite::Connection;
-use std::io::Write;
+use std::{collections::HashMap, io::Write};
 
 pub const USAGE: &str = "Usage:
   cli-todo                              Open the interactive app
   cli-todo add <title> [-p <project>]   Add a task, to Inbox unless a project is given
+  cli-todo add <title> --parent <id>    Add a subtask to the task with that id
   cli-todo list [-p <project>] [--all]  List pending tasks; --all includes completed
+  cli-todo list --parent <id> [--all]   List the subtasks of the task with that id
   cli-todo done <id>                    Complete a task, or reopen a completed one
   cli-todo delete <id>                  Delete a task and its subtasks
   cli-todo project add <name>           Add a project
@@ -18,6 +20,9 @@ pub const USAGE: &str = "Usage:
                                         Delete a project; --force also deletes its tasks
   cli-todo help                         Show this help
   cli-todo -v, --version                Show the version";
+
+/// Options followed by a value; any other option is a flag.
+const VALUE_OPTIONS: [&str; 2] = ["--project", "--parent"];
 
 /// Runs one non-interactive command; `args` excludes the program name.
 pub fn run(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
@@ -34,31 +39,39 @@ pub fn run(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()>
     }
 }
 
-/// Splits `args` into words, the `-p`/`--project` value, and whether each flag in `flags` was set.
+/// Splits `args` into words and the `allowed` options, mapped to their value ("" for flags).
+/// `-p` is short for `--project`.
 fn parse<'a>(
     args: &'a [String],
-    flags: &[&str],
-) -> Result<(Vec<&'a str>, Option<&'a str>, Vec<bool>)> {
+    allowed: &[&'static str],
+) -> Result<(Vec<&'a str>, HashMap<&'static str, &'a str>)> {
     let mut words = vec![];
-    let mut project = None;
-    let mut set = vec![false; flags.len()];
+    let mut options = HashMap::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "-p" | "--project" => {
-                project = Some(args.next().ok_or("-p needs a project name")?.as_str());
-            }
-            flag if flag.starts_with('-') => {
-                let index = flags
-                    .iter()
-                    .position(|known| *known == flag)
-                    .ok_or_else(|| format!("Unknown option '{flag}'"))?;
-                set[index] = true;
-            }
-            word => words.push(word),
+        let option = if arg == "-p" {
+            "--project"
+        } else {
+            arg.as_str()
+        };
+        if !option.starts_with('-') {
+            words.push(option);
+            continue;
         }
+        let option = *allowed
+            .iter()
+            .find(|known| **known == option)
+            .ok_or_else(|| format!("Unknown option '{arg}'"))?;
+        let value = if VALUE_OPTIONS.contains(&option) {
+            args.next()
+                .ok_or_else(|| format!("{arg} needs a value"))?
+                .as_str()
+        } else {
+            ""
+        };
+        options.insert(option, value);
     }
-    Ok((words, project, set))
+    Ok((words, options))
 }
 
 fn find_project(db: &Connection, name: &str) -> Result<Project> {
@@ -85,16 +98,36 @@ fn one_word<'a>(words: &[&'a str], usage: &str) -> Result<&'a str> {
     }
 }
 
+/// Rejects `-p` with `--parent`: subtasks always live in their parent's project.
+fn project_or_parent<'a>(
+    options: &HashMap<&str, &'a str>,
+) -> Result<(Option<&'a str>, Option<&'a str>)> {
+    match (options.get("--project"), options.get("--parent")) {
+        (Some(_), Some(_)) => {
+            Err("Use -p or --parent, not both; subtasks stay in their parent's project".into())
+        }
+        (project, parent) => Ok((project.copied(), parent.copied())),
+    }
+}
+
 fn add(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
-    let (words, project, _) = parse(args, &[])?;
-    let project = project.map(|name| find_project(db, name)).transpose()?;
+    let (words, options) = parse(args, &["--project", "--parent"])?;
+    let (project, parent) = project_or_parent(&options)?;
     let draft = TaskDraft {
         title: words.join(" ").trim().into(),
         ..TaskDraft::default()
     };
     if draft.title.is_empty() {
-        return Err("Usage: cli-todo add <title> [-p <project>]".into());
+        return Err("Usage: cli-todo add <title> [-p <project> | --parent <id>]".into());
     }
+    if let Some(parent) = parent {
+        let (parent, parent_title) = task_title(db, parent)?;
+        db::save_subtask_tree(db, parent, &draft)?;
+        let id = db.last_insert_rowid();
+        writeln!(out, "Added subtask {id} to {parent_title}: {}", draft.title)?;
+        return Ok(());
+    }
+    let project = project.map(|name| find_project(db, name)).transpose()?;
     db::save_task_tree(db, None, &draft, project.as_ref().map(|project| project.id))?;
     let place = project.map_or("Inbox".into(), |project| project.name);
     writeln!(
@@ -107,38 +140,65 @@ fn add(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
 }
 
 fn list(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
-    let (words, project, flags) = parse(args, &["--all"])?;
+    let (words, options) = parse(args, &["--project", "--parent", "--all"])?;
     if !words.is_empty() {
-        return Err("Usage: cli-todo list [-p <project>] [--all]".into());
+        return Err("Usage: cli-todo list [-p <project> | --parent <id>] [--all]".into());
     }
-    let project = project.map(|name| find_project(db, name)).transpose()?;
-    let projects = db::list_projects(db)?;
-    let filter = if flags[0] {
+    let (project, parent) = project_or_parent(&options)?;
+    let filter = if options.contains_key("--all") {
         Filter::All
     } else {
         Filter::Pending
     };
-    let project = project.map(|project| project.id);
-    let sort = db::load_sort(db, project, filter)?;
-    let tasks = db::list_tasks_in(db, filter, project, sort)?;
+    let tasks = if let Some(parent) = parent {
+        let (parent, _) = task_title(db, parent)?;
+        let project = db.query_row(
+            "SELECT project_id FROM tasks WHERE id=?1",
+            [parent],
+            |row| row.get(0),
+        )?;
+        let sort = db::load_sort(db, project, filter)?;
+        db::subtasks_of(&db::list_tasks(db, filter)?, parent, sort)
+    } else {
+        let project = project
+            .map(|name| find_project(db, name))
+            .transpose()?
+            .map(|project| project.id);
+        let sort = db::load_sort(db, project, filter)?;
+        db::list_tasks_in(db, filter, project, sort)?
+    };
     if tasks.is_empty() {
         writeln!(out, "No tasks")?;
     }
+    // Only top-level Inbox lists mix projects; elsewhere the name would repeat on every line.
+    let projects = if project.is_none() && parent.is_none() {
+        db::list_projects(db)?
+    } else {
+        vec![]
+    };
     for task in tasks {
         let mark = if task.done { 'x' } else { ' ' };
-        // Inside a single project the name would repeat on every line.
+        let subtasks = match task.subtask_count {
+            0 => String::new(),
+            1 => "  +1 subtask".into(),
+            count => format!("  +{count} subtasks"),
+        };
         let place = projects
             .iter()
-            .find(|candidate| project.is_none() && task.project_id == Some(candidate.id))
+            .find(|candidate| task.project_id == Some(candidate.id))
             .map(|candidate| format!("  ({})", candidate.name))
             .unwrap_or_default();
-        writeln!(out, "{:>4}  [{mark}] {}{place}", task.id, task.title)?;
+        writeln!(
+            out,
+            "{:>4}  [{mark}] {}{subtasks}{place}",
+            task.id, task.title
+        )?;
     }
     Ok(())
 }
 
 fn done(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
-    let (words, _, _) = parse(args, &[])?;
+    let (words, _) = parse(args, &[])?;
     let (id, title) = task_title(db, one_word(&words, "done <id>")?)?;
     db::toggle_task(db, id)?;
     let done: bool = db.query_row("SELECT done FROM tasks WHERE id=?1", [id], |row| row.get(0))?;
@@ -148,7 +208,7 @@ fn done(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
 }
 
 fn delete(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
-    let (words, _, _) = parse(args, &[])?;
+    let (words, _) = parse(args, &[])?;
     let (id, title) = task_title(db, one_word(&words, "delete <id>")?)?;
     db::delete_task(db, id)?;
     writeln!(out, "Deleted task {id}: {title}")?;
@@ -156,7 +216,7 @@ fn delete(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> 
 }
 
 fn project(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
-    let (words, _, flags) = parse(args, &["--force"])?;
+    let (words, options) = parse(args, &["--force"])?;
     match words.as_slice() {
         ["add", name] => {
             db::save_project(db, None, name).map_err(|error| unique_name(error, name))?;
@@ -183,7 +243,7 @@ fn project(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()>
                 [project.id],
                 |row| row.get(0),
             )?;
-            if tasks > 0 && !flags[0] {
+            if tasks > 0 && !options.contains_key("--force") {
                 return Err(format!(
                     "Project {} has {tasks} tasks. Add --force to delete them too",
                     project.name
