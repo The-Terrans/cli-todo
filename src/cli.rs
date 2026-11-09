@@ -1,7 +1,9 @@
 use crate::{
+    dates::{date_phrases, parse_due_date},
     db,
     types::{Filter, Project, Result, TaskDraft},
 };
+use chrono::Local;
 use rusqlite::Connection;
 use std::{collections::HashMap, io::Write};
 
@@ -9,8 +11,15 @@ pub const USAGE: &str = "Usage:
   cli-todo                              Open the interactive app
   cli-todo add <title> [-p <project>]   Add a task, to Inbox unless a project is given
   cli-todo add <title> --parent <id>    Add a subtask to the task with that id
+      [--description <text>] [--due <date>] [--priority <1-3>]
+                                        Optional fields for add and edit
   cli-todo list [-p <project>] [--all]  List pending tasks; --all includes completed
   cli-todo list --parent <id> [--all]   List the subtasks of the task with that id
+  cli-todo show <id>                    Show a task's details and description
+  cli-todo edit <id> [--title <title>] [--description <text>] [--due <date>] [--priority <1-3>]
+                                        Change fields; \"\" or none clears due and priority
+  cli-todo move <id> -p <project>       Move a task and its subtasks to a project
+  cli-todo move <id> --inbox            Move a task and its subtasks to Inbox
   cli-todo done <id>                    Complete a task, or reopen a completed one
   cli-todo delete <id>                  Delete a task and its subtasks
   cli-todo project add <name>           Add a project
@@ -19,10 +28,23 @@ pub const USAGE: &str = "Usage:
   cli-todo project delete <name> [--force]
                                         Delete a project; --force also deletes its tasks
   cli-todo help                         Show this help
-  cli-todo -v, --version                Show the version";
+  cli-todo -v, --version                Show the version
+
+Dates: YYYY-MM-DD, today, tomorrow, fri, next fri, next week, next month,
+       in 3 days, in 2 weeks, 30 nov 2026, 30-11-2026";
 
 /// Options followed by a value; any other option is a flag.
-const VALUE_OPTIONS: [&str; 2] = ["--project", "--parent"];
+const VALUE_OPTIONS: [&str; 6] = [
+    "--project",
+    "--parent",
+    "--title",
+    "--description",
+    "--due",
+    "--priority",
+];
+
+/// Task fields `add` and `edit` accept as options.
+const FIELDS: [&str; 3] = ["--description", "--due", "--priority"];
 
 /// Runs one non-interactive command; `args` excludes the program name.
 pub fn run(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
@@ -30,6 +52,9 @@ pub fn run(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()>
     match command.as_str() {
         "add" => add(db, rest, out),
         "list" => list(db, rest, out),
+        "show" => show(db, rest, out),
+        "edit" => edit(db, rest, out),
+        "move" => move_to(db, rest, out),
         "done" => done(db, rest, out),
         "delete" => delete(db, rest, out),
         "project" => project(db, rest, out),
@@ -110,13 +135,58 @@ fn project_or_parent<'a>(
     }
 }
 
+/// Accepts YYYY-MM-DD or one date phrase the task editor understands; "" or none clears.
+fn due_date(input: &str) -> Result<String> {
+    let input = input.trim();
+    if input.is_empty() || input == "none" {
+        return Ok(String::new());
+    }
+    if let Ok(Some(date)) = parse_due_date(input) {
+        return Ok(date.to_string());
+    }
+    match date_phrases(input, Local::now().date_naive()).as_slice() {
+        [phrase] if phrase.range == (0..input.len()) => Ok(phrase.date.to_string()),
+        _ => Err(format!(
+            "Can't read due date '{input}'. Use YYYY-MM-DD, tomorrow, fri, next week, in 3 days, or 30 nov 2026"
+        )
+        .into()),
+    }
+}
+
+/// Accepts 1-3, optionally as P1-P3; "" or none clears.
+fn priority(input: &str) -> Result<Option<u8>> {
+    let input = input.trim().to_ascii_lowercase();
+    match input.strip_prefix('p').unwrap_or(&input) {
+        "" | "none" => Ok(None),
+        "1" => Ok(Some(1)),
+        "2" => Ok(Some(2)),
+        "3" => Ok(Some(3)),
+        _ => Err(format!("Priority must be 1, 2, 3, or none, not '{input}'").into()),
+    }
+}
+
+/// Applies the `FIELDS` options to `draft`.
+fn apply_fields(draft: &mut TaskDraft, options: &HashMap<&str, &str>) -> Result<()> {
+    if let Some(description) = options.get("--description") {
+        draft.description = description.to_string();
+    }
+    if let Some(due) = options.get("--due") {
+        draft.due_date = due_date(due)?;
+    }
+    if let Some(value) = options.get("--priority") {
+        draft.priority = priority(value)?;
+    }
+    Ok(())
+}
+
 fn add(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
-    let (words, options) = parse(args, &["--project", "--parent"])?;
+    let (words, options) = parse(args, &[&["--project", "--parent"], &FIELDS[..]].concat())?;
     let (project, parent) = project_or_parent(&options)?;
-    let draft = TaskDraft {
+    let mut draft = TaskDraft {
         title: words.join(" ").trim().into(),
         ..TaskDraft::default()
     };
+    apply_fields(&mut draft, &options)?;
     if draft.title.is_empty() {
         return Err("Usage: cli-todo add <title> [-p <project> | --parent <id>]".into());
     }
@@ -194,6 +264,88 @@ fn list(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
             task.id, task.title
         )?;
     }
+    Ok(())
+}
+
+fn show(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
+    let (words, _) = parse(args, &[])?;
+    let (id, _) = task_title(db, one_word(&words, "show <id>")?)?;
+    let task = db::list_tasks(db, Filter::All)?
+        .into_iter()
+        .find(|task| task.id == id)
+        .ok_or("Task disappeared while reading it")?;
+    let mark = if task.done { 'x' } else { ' ' };
+    let project = db::list_projects(db)?
+        .into_iter()
+        .find(|project| task.project_id == Some(project.id))
+        .map_or("Inbox".into(), |project| project.name);
+    writeln!(out, "{id}  [{mark}] {}", task.title)?;
+    writeln!(out, "Project:  {project}")?;
+    if let (Some(parent), Some(title)) = (task.parent_id, &task.parent_title) {
+        writeln!(out, "Parent:   {parent}  {title}")?;
+    }
+    if let Some(due) = task.due_date {
+        writeln!(out, "Due:      {due}")?;
+    }
+    if let Some(priority) = task.priority {
+        writeln!(out, "Priority: P{priority}")?;
+    }
+    if task.subtask_count > 0 {
+        writeln!(
+            out,
+            "Subtasks: {}  (cli-todo list --parent {id})",
+            task.subtask_count
+        )?;
+    }
+    if !task.description.is_empty() {
+        writeln!(out, "\n{}", task.description)?;
+    }
+    Ok(())
+}
+
+fn edit(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
+    let (words, options) = parse(args, &[&["--title"], &FIELDS[..]].concat())?;
+    let usage =
+        "edit <id> [--title <title>] [--description <text>] [--due <date>] [--priority <1-3>]";
+    let (id, _) = task_title(db, one_word(&words, usage)?)?;
+    if options.is_empty() {
+        return Err(format!("Nothing to change. Usage: cli-todo {usage}").into());
+    }
+    let mut draft = db::task_draft(db, id)?;
+    if let Some(title) = options.get("--title") {
+        draft.title = title.trim().into();
+    }
+    apply_fields(&mut draft, &options)?;
+    // reword_task validates the title before anything is written; priority is saved separately.
+    db::reword_task(db, id, &draft)?;
+    db::set_priority(db, id, draft.priority)?;
+    writeln!(out, "Updated task {id}: {}", draft.title)?;
+    Ok(())
+}
+
+fn move_to(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
+    let (words, options) = parse(args, &["--project", "--inbox"])?;
+    let usage = "move <id> (-p <project> | --inbox)";
+    let (id, title) = task_title(db, one_word(&words, usage)?)?;
+    let project = match (options.get("--project"), options.contains_key("--inbox")) {
+        (Some(name), false) => Some(find_project(db, name)?),
+        (None, true) => None,
+        _ => return Err(format!("Usage: cli-todo {usage}").into()),
+    };
+    let was_subtask: bool = db.query_row(
+        "SELECT parent_id IS NOT NULL FROM tasks WHERE id=?1",
+        [id],
+        |row| row.get(0),
+    )?;
+    db::move_task(db, id, project.as_ref().map(|project| project.id))?;
+    let place = project.map_or("Inbox".into(), |project| project.name);
+    // A subtask cannot sit in another project than its parent, so moving detaches it.
+    let detached = if was_subtask {
+        " as a top-level task"
+    } else {
+        ""
+    };
+    writeln!(out, "Moved task {id} to {place}{detached}: {title}")?;
     Ok(())
 }
 

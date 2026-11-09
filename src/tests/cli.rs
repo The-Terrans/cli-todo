@@ -167,3 +167,139 @@ fn adds_and_lists_subtasks_one_level_at_a_time() -> Result<()> {
     assert_eq!(error(&db, "done 1 -p Work"), "Unknown option '-p'");
     Ok(())
 }
+
+/// Like `cli`, but takes pre-split arguments so values can contain spaces.
+fn cli_args(db: &Connection, args: &[&str]) -> Result<String> {
+    let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+    let mut out = vec![];
+    run(db, &args, &mut out)?;
+    Ok(String::from_utf8(out)?)
+}
+
+#[test]
+fn shows_and_edits_task_fields() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    cli(&db, "project add Work")?;
+    cli_args(
+        &db,
+        &[
+            "add",
+            "Ship",
+            "-p",
+            "Work",
+            "--description",
+            "Tag it\nthen release",
+            "--due",
+            "2030-01-02",
+            "--priority",
+            "P1",
+        ],
+    )?;
+    cli(&db, "add Docs --parent 1")?;
+    assert_eq!(
+        cli(&db, "show 1")?,
+        "1  [ ] Ship\nProject:  Work\nDue:      2030-01-02\nPriority: P1\n\
+         Subtasks: 1  (cli-todo list --parent 1)\n\nTag it\nthen release\n"
+    );
+    assert_eq!(
+        cli(&db, "show 2")?,
+        "2  [ ] Docs\nProject:  Work\nParent:   1  Ship\n"
+    );
+
+    assert_eq!(
+        cli_args(&db, &["edit", "1", "--title", "Ship v2", "--priority", "3"])?,
+        "Updated task 1: Ship v2\n"
+    );
+    let tomorrow = Local::now()
+        .date_naive()
+        .succ_opt()
+        .ok_or("date overflow")?;
+    cli_args(
+        &db,
+        &["edit", "2", "--due", "Tomorrow", "--description", "notes"],
+    )?;
+    assert_eq!(
+        cli(&db, "show 2")?,
+        format!(
+            "2  [ ] Docs\nProject:  Work\nParent:   1  Ship v2\nDue:      {tomorrow}\n\nnotes\n"
+        )
+    );
+    cli_args(
+        &db,
+        &[
+            "edit",
+            "1",
+            "--due",
+            "none",
+            "--priority",
+            "",
+            "--description",
+            "",
+        ],
+    )?;
+    assert_eq!(
+        cli(&db, "show 1")?,
+        "1  [ ] Ship v2\nProject:  Work\nSubtasks: 1  (cli-todo list --parent 1)\n"
+    );
+
+    assert_eq!(error(&db, "edit 1"), "Nothing to change. Usage: cli-todo edit <id> [--title <title>] [--description <text>] [--due <date>] [--priority <1-3>]");
+    assert_eq!(
+        error(&db, "edit 1 --priority 4"),
+        "Priority must be 1, 2, 3, or none, not '4'"
+    );
+    assert_eq!(
+        error(&db, "edit 1 --due someday"),
+        "Can't read due date 'someday'. Use YYYY-MM-DD, tomorrow, fri, next week, in 3 days, or 30 nov 2026"
+    );
+    assert_eq!(error(&db, "edit 1 --due 2030-02-30"), "Can't read due date '2030-02-30'. Use YYYY-MM-DD, tomorrow, fri, next week, in 3 days, or 30 nov 2026");
+    // A rejected edit changes nothing, even fields that were valid.
+    assert_eq!(
+        error(&db, "edit 1 --title  --priority 1"),
+        "Title cannot be empty"
+    );
+    assert_eq!(
+        cli(&db, "show 1")?,
+        "1  [ ] Ship v2\nProject:  Work\nSubtasks: 1  (cli-todo list --parent 1)\n"
+    );
+    assert_eq!(
+        error(&db, "show 9"),
+        "No task with id 9. Run 'cli-todo list --all'"
+    );
+    assert_eq!(error(&db, "edit 1 -p Work"), "Unknown option '-p'");
+    Ok(())
+}
+
+#[test]
+fn moves_tasks_with_subtasks_between_projects() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    cli(&db, "project add Work")?;
+    cli(&db, "project add Home")?;
+    cli(&db, "add Ship -p Work")?;
+    cli(&db, "add Docs --parent 1")?;
+    cli(&db, "add Draft --parent 2")?;
+    assert_eq!(cli(&db, "move 1 -p Home")?, "Moved task 1 to Home: Ship\n");
+    assert_eq!(cli(&db, "list -p Home")?, "   1  [ ] Ship  +1 subtask\n");
+    assert_eq!(cli(&db, "show 3")?.lines().nth(1), Some("Project:  Home"));
+    assert_eq!(
+        cli(&db, "move 2 --inbox")?,
+        "Moved task 2 to Inbox as a top-level task: Docs\n"
+    );
+    assert_eq!(
+        cli(&db, "list")?,
+        "   1  [ ] Ship  (Home)\n   2  [ ] Docs  +1 subtask\n"
+    );
+    assert_eq!(cli(&db, "show 3")?.lines().nth(1), Some("Project:  Inbox"));
+    assert_eq!(
+        error(&db, "move 1"),
+        "Usage: cli-todo move <id> (-p <project> | --inbox)"
+    );
+    assert_eq!(
+        error(&db, "move 1 -p Home --inbox"),
+        "Usage: cli-todo move <id> (-p <project> | --inbox)"
+    );
+    assert_eq!(
+        error(&db, "move 1 -p Nope"),
+        "No project named 'Nope'. Run 'cli-todo project list'"
+    );
+    Ok(())
+}
