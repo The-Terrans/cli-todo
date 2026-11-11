@@ -7,7 +7,7 @@ use editor_render::{set_cursor, set_input_cursor, task_field_text, wrapped_curso
 mod editor_render_tests;
 
 use crate::{
-    constants::{FILTERS, KEYBINDINGS, PRIORITIES, SORTS},
+    constants::{FILTERS, KEYBINDINGS, MAX_PROJECT_DESCRIPTION, PRIORITIES, SORTS},
     dates::is_overdue,
     types::{App, Mode, Sort, Task, TaskDraft, TaskField, TaskPane, TaskView},
 };
@@ -104,17 +104,24 @@ fn task_selection_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-/// Renders tasks inside `block` and draws side borders around the selected one.
+/// Renders `header` and then tasks inside `block`, and draws side borders around the selected task.
 fn draw_task_list(
     frame: &mut Frame,
     area: Rect,
     block: Block,
+    header: Option<Paragraph>,
     items: Vec<ListItem<'static>>,
     selected: Option<usize>,
 ) {
     let heights: Vec<usize> = items.iter().map(ListItem::height).collect();
-    let inner = block.inner(area);
+    let mut inner = block.inner(area);
     frame.render_widget(block, area);
+    if let Some(header) = header {
+        let height = (header.line_count(inner.width) as u16).min(inner.height);
+        frame.render_widget(header, Rect { height, ..inner });
+        inner.y += height;
+        inner.height -= height;
+    }
     let mut state = ListState::default().with_selected(selected);
     // The blank gutter leaves room for the left border and its padding.
     frame.render_stateful_widget(
@@ -412,6 +419,7 @@ fn draw_task_view(frame: &mut Frame, area: Rect, app: &App, view: &TaskView) {
             area,
             panel(&format!(" Subtasks{} ", sort_suffix(app.sort)), focused)
                 .border_type(BorderType::Rounded),
+            None,
             items,
             focused.then_some(view.selected_child),
         );
@@ -490,20 +498,46 @@ fn draw_tasks(frame: &mut Frame, area: Rect, app: &App) {
     let mut title = project_title(app, "─[0]─Tasks", app.current_project);
     title.push_str(&format!(" · {}", FILTERS[app.selected_filter].0));
     title.push_str(&sort_suffix(app.sort));
+    let header = project_description(app);
+    let header_height = header.as_ref().map_or(0, |header| {
+        header.line_count(area.width.saturating_sub(2)) as u16
+    });
     draw_task_list(
         frame,
         area,
         panel(&title, !app.navigation_focused).border_type(BorderType::Rounded),
+        header,
         items.collect(),
         (active && !app.tasks.is_empty()).then_some(app.selected_task),
     );
     if app.tasks.is_empty() {
+        let mut empty = area.inner(Margin::new(2, 1));
+        empty.y += header_height.min(empty.height);
+        empty.height -= header_height.min(empty.height);
         frame.render_widget(
             Paragraph::new("No tasks here. Press a to add.")
                 .style(Style::default().fg(Color::Reset)),
-            area.inner(Margin::new(2, 1)),
+            empty,
         );
     }
+}
+
+/// The open project's description, gray italic and wrapped, with a blank line below; `None` when unset.
+fn project_description(app: &App) -> Option<Paragraph<'static>> {
+    let project = app
+        .current_project
+        .and_then(|id| app.projects.iter().find(|project| project.id == id))
+        .filter(|project| !project.description.is_empty())?;
+    let style = Style::default()
+        .fg(Color::Gray)
+        .add_modifier(Modifier::ITALIC);
+    Some(
+        Paragraph::new(vec![
+            Line::styled(format!("  {}", project.description), style),
+            Line::raw(""),
+        ])
+        .wrap(Wrap { trim: false }),
+    )
 }
 
 fn project_title(app: &App, label: &str, project: Option<i64>) -> String {
@@ -593,6 +627,19 @@ fn draw_dialog(frame: &mut Frame, app: &App) {
                 } else {
                     " Add project "
                 },
+                text,
+                &app.input_cursor,
+                &app.message,
+                "save",
+            );
+        }
+        Mode::ProjectDescription(_, text) => {
+            return draw_input_dialog(
+                frame,
+                &format!(
+                    " Project description ({}/{MAX_PROJECT_DESCRIPTION}) ",
+                    text.chars().count()
+                ),
                 text,
                 &app.input_cursor,
                 &app.message,

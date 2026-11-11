@@ -1,5 +1,5 @@
 use crate::{
-    constants::MAX_SUBTASK_DEPTH,
+    constants::{MAX_PROJECT_DESCRIPTION, MAX_SUBTASK_DEPTH},
     dates::parse_due_date,
     types::{Filter, Project, Sort, SubtaskDraft, Task, TaskDraft},
     Result,
@@ -47,6 +47,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     migrate_sorts(&db)?;
     migrate_project_positions(&db)?;
     migrate_priorities(&db)?;
+    migrate_project_descriptions(&db)?;
     validate_hierarchy(&db)?;
     Ok(db)
 }
@@ -149,6 +150,16 @@ pub fn migrate_project_positions(db: &Connection) -> Result<()> {
         db.execute_batch("ALTER TABLE projects ADD COLUMN position INTEGER;")?;
     }
     db.execute_batch("UPDATE projects SET position=id WHERE position IS NULL;")?;
+    Ok(())
+}
+
+pub fn migrate_project_descriptions(db: &Connection) -> Result<()> {
+    if !table_has_column(db, "projects", "description")? {
+        db.execute_batch(&format!(
+            "ALTER TABLE projects ADD COLUMN description TEXT NOT NULL DEFAULT ''
+             CHECK(length(description) <= {MAX_PROJECT_DESCRIPTION});"
+        ))?;
+    }
     Ok(())
 }
 
@@ -720,13 +731,19 @@ pub fn list_projects(db: &Connection) -> Result<Vec<Project>> {
     } else {
         "id"
     };
+    let description = if table_has_column(db, "projects", "description")? {
+        "description"
+    } else {
+        "''"
+    };
     let mut statement = db.prepare(&format!(
-        "SELECT id,name FROM projects ORDER BY {position},id"
+        "SELECT id,name,{description} FROM projects ORDER BY {position},id"
     ))?;
     let rows = statement.query_map([], |row| {
         Ok(Project {
             id: row.get(0)?,
             name: row.get(1)?,
+            description: row.get(2)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -746,6 +763,32 @@ pub fn save_project(db: &Connection, id: Option<i64>, name: &str) -> Result<()> 
             [name],
         )?;
     }
+    Ok(())
+}
+
+/// Trims `description` and checks it is one line of at most `MAX_PROJECT_DESCRIPTION` characters.
+pub fn validate_project_description(description: &str) -> Result<&str> {
+    let description = description.trim();
+    if description.contains(['\n', '\r']) {
+        return Err("Project description must be one line".into());
+    }
+    let length = description.chars().count();
+    if length > MAX_PROJECT_DESCRIPTION {
+        return Err(format!(
+            "Project description is {length} characters; the limit is {MAX_PROJECT_DESCRIPTION}"
+        )
+        .into());
+    }
+    Ok(description)
+}
+
+/// Sets the description of project `id`; empty text clears it.
+pub fn set_project_description(db: &Connection, id: i64, description: &str) -> Result<()> {
+    let description = validate_project_description(description)?;
+    db.execute(
+        "UPDATE projects SET description=?1 WHERE id=?2",
+        params![description, id],
+    )?;
     Ok(())
 }
 
