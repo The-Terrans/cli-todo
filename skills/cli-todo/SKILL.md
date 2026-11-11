@@ -39,7 +39,7 @@ cli-todo done 12                             # toggles: completes, or reopens if
 cli-todo delete 12                           # deletes task 12 and all its subtasks
 cli-todo project add Work
 cli-todo project add Work --description "Day job"   # one line, max 100 characters
-cli-todo project describe Work "Day job"     # "" clears the description
+cli-todo project describe Work "Day job"     # sets the description; pass "" to clear it
 cli-todo project list                        # "Name" or "Name — description" per line
 cli-todo project rename Work Job
 cli-todo project delete Job [--force]        # --force required if it has tasks; deletes them
