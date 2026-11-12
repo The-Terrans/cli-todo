@@ -22,8 +22,11 @@ pub const USAGE: &str = "Usage:
   cli-todo move <id> --inbox            Move a task and its subtasks to Inbox
   cli-todo done <id>                    Complete a task, or reopen a completed one
   cli-todo delete <id>                  Delete a task and its subtasks
-  cli-todo project add <name>           Add a project
-  cli-todo project list                 List projects
+  cli-todo project add <name> [--description <text>]
+                                        Add a project
+  cli-todo project describe <name> <text>
+                                        Set a project's one-line description; \"\" clears
+  cli-todo project list                 List projects and their descriptions
   cli-todo project rename <name> <new>  Rename a project
   cli-todo project delete <name> [--force]
                                         Delete a project; --force also deletes its tasks
@@ -368,11 +371,29 @@ fn delete(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> 
 }
 
 fn project(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()> {
-    let (words, options) = parse(args, &["--force"])?;
+    let (words, options) = parse(args, &["--force", "--description"])?;
+    if options.contains_key("--description") && words.first() != Some(&"add") {
+        return Err("--description only works with 'project add'; use 'project describe'".into());
+    }
     match words.as_slice() {
         ["add", name] => {
-            db::save_project(db, None, name).map_err(|error| unique_name(error, name))?;
+            let description =
+                db::validate_project_description(options.get("--description").unwrap_or(&""))?;
+            let transaction = db.unchecked_transaction()?;
+            db::save_project(&transaction, None, name).map_err(|error| unique_name(error, name))?;
+            let id = transaction.last_insert_rowid();
+            db::set_project_description(&transaction, id, description)?;
+            transaction.commit()?;
             writeln!(out, "Added project {}", name.trim())?;
+        }
+        ["describe", name, description] => {
+            let project = find_project(db, name)?;
+            db::set_project_description(db, project.id, description)?;
+            if description.trim().is_empty() {
+                writeln!(out, "Cleared description of project {}", project.name)?;
+            } else {
+                writeln!(out, "Described project {}", project.name)?;
+            }
         }
         ["list"] => {
             let projects = db::list_projects(db)?;
@@ -380,7 +401,11 @@ fn project(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()>
                 writeln!(out, "No projects")?;
             }
             for project in projects {
-                writeln!(out, "{}", project.name)?;
+                if project.description.is_empty() {
+                    writeln!(out, "{}", project.name)?;
+                } else {
+                    writeln!(out, "{} — {}", project.name, project.description)?;
+                }
             }
         }
         ["rename", name, new] => {
@@ -407,7 +432,8 @@ fn project(db: &Connection, args: &[String], out: &mut impl Write) -> Result<()>
         }
         _ => {
             return Err(
-                "Usage: cli-todo project add|list|rename|delete. Run 'cli-todo help'".into(),
+                "Usage: cli-todo project add|describe|list|rename|delete. Run 'cli-todo help'"
+                    .into(),
             )
         }
     }

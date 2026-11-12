@@ -2,6 +2,9 @@ use crate::types::{Action, Filter, Sort};
 
 pub const MAX_SUBTASK_DEPTH: usize = 64;
 
+/// Project descriptions are one line of at most this many characters.
+pub const MAX_PROJECT_DESCRIPTION: usize = 100;
+
 pub const FILTERS: [(&str, Filter); 7] = [
     ("Today", Filter::Today),
     ("All", Filter::All),
@@ -49,6 +52,7 @@ pub const KEYBINDINGS: &[&str] = &[
     "  a             Add task; add child when a task is open",
     "  e             Edit task: Title / Description / Due date",
     "  e             Rename project in Projects",
+    "  i             Describe project in Projects; shown above its tasks",
     "  Alt+J / Alt+K Move selected project down/up in Projects (Alt+Down/Up)",
     "  x             Toggle opened/selected task completed/pending",
     "  PageUp/Down   Scroll opened task details (Home/End jump)",

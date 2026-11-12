@@ -168,6 +168,51 @@ fn adds_and_lists_subtasks_one_level_at_a_time() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn describes_projects() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    assert_eq!(
+        cli_args(&db, &["project", "add", "Work", "--description", "Day job"])?,
+        "Added project Work\n"
+    );
+    cli(&db, "project add Home")?;
+    assert_eq!(cli(&db, "project list")?, "Work — Day job\nHome\n");
+    assert_eq!(
+        cli_args(&db, &["project", "describe", "Home", "Chores and errands"])?,
+        "Described project Home\n"
+    );
+    assert_eq!(
+        cli_args(&db, &["project", "describe", "Work", ""])?,
+        "Cleared description of project Work\n"
+    );
+    assert_eq!(
+        cli(&db, "project list")?,
+        "Work\nHome — Chores and errands\n"
+    );
+    let long = "x".repeat(101);
+    assert_eq!(
+        cli_args(&db, &["project", "add", "Side", "--description", &long])
+            .unwrap_err()
+            .to_string(),
+        "Project description is 101 characters; the limit is 100"
+    );
+    // A rejected description adds no project.
+    assert_eq!(
+        cli(&db, "project list")?,
+        "Work\nHome — Chores and errands\n"
+    );
+    assert!(cli_args(&db, &["project", "describe", "Home", &long]).is_err());
+    assert_eq!(
+        error(&db, "project rename Home House --description x"),
+        "--description only works with 'project add'; use 'project describe'"
+    );
+    assert_eq!(
+        error(&db, "project describe Nope x"),
+        "No project named 'Nope'. Run 'cli-todo project list'"
+    );
+    Ok(())
+}
+
 /// Like `cli`, but takes pre-split arguments so values can contain spaces.
 fn cli_args(db: &Connection, args: &[&str]) -> Result<String> {
     let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();

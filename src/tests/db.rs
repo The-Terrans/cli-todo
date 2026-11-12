@@ -699,6 +699,47 @@ fn positions_migrate_in_creation_order_swap_and_append_new_tasks() -> Result<()>
 }
 
 #[test]
+fn project_descriptions_migrate_empty_and_enforce_one_line_limit() -> Result<()> {
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_nanos();
+    let path = env::temp_dir().join(format!("cli-todo-project-description-{stamp}.sqlite3"));
+    let legacy = Connection::open(&path)?;
+    legacy.execute_batch("CREATE TABLE projects(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE); INSERT INTO projects(name) VALUES ('Work');")?;
+    // Old snapshots without the column still list.
+    assert_eq!(list_projects(&legacy)?[0].description, "");
+    drop(legacy);
+    let db = open(&path)?;
+    assert_eq!(list_projects(&db)?[0].description, "");
+    set_project_description(&db, 1, "  Ship the Q4 release  ")?;
+    assert_eq!(list_projects(&db)?[0].description, "Ship the Q4 release");
+    // The limit counts characters, not bytes.
+    let longest = "é".repeat(MAX_PROJECT_DESCRIPTION);
+    set_project_description(&db, 1, &longest)?;
+    assert_eq!(list_projects(&db)?[0].description, longest);
+    assert_eq!(
+        set_project_description(&db, 1, &format!("{longest}x"))
+            .unwrap_err()
+            .to_string(),
+        "Project description is 101 characters; the limit is 100"
+    );
+    assert!(set_project_description(&db, 1, "two\nlines").is_err());
+    // The schema rejects over-limit text written around the app.
+    assert!(db
+        .execute(
+            "UPDATE projects SET description=?1 WHERE id=1",
+            ["x".repeat(MAX_PROJECT_DESCRIPTION + 1)],
+        )
+        .is_err());
+    assert_eq!(list_projects(&db)?[0].description, longest);
+    set_project_description(&db, 1, "")?;
+    assert_eq!(list_projects(&db)?[0].description, "");
+    drop(db);
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn project_positions_migrate_in_creation_order_swap_and_append_new_projects() -> Result<()> {
     let stamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?

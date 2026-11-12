@@ -1,6 +1,6 @@
 ---
 name: cli-todo
-description: Manages the user's todo list with the `cli-todo` command - add, list, show, edit (title, description, due date, priority), move, complete, reopen, and delete tasks and subtasks, and add, list, rename, and delete projects. Use when the user asks to add a todo or task, check what is pending, mark something done, organize tasks into projects, or break a task into subtasks. Before reading further, run `cli-todo -v` with a 5-second timeout. Continue only if it prints `cli-todo <version>`. If the command is missing, errors, or times out, cli-todo is not installed or predates these commands, so do not read this skill and tell the user to install or update cli-todo. Do NOT run bare `cli-todo`, which opens an interactive terminal UI that blocks the agent.
+description: Manages the user's todo list with the `cli-todo` command - add, list, show, edit (title, description, due date, priority), move, complete, reopen, and delete tasks and subtasks, and add, list, describe, rename, and delete projects. Use when the user asks to add a todo or task, check what is pending, mark something done, organize tasks into projects, or break a task into subtasks. Before reading further, run `cli-todo -v` with a 5-second timeout. Continue only if it prints `cli-todo <version>`. If the command is missing, errors, or times out, cli-todo is not installed or predates these commands, so do not read this skill and tell the user to install or update cli-todo. Do NOT run bare `cli-todo`, which opens an interactive terminal UI that blocks the agent.
 ---
 
 # cli-todo
@@ -38,7 +38,9 @@ cli-todo move 12 --inbox                     # back to Inbox (no project)
 cli-todo done 12                             # toggles: completes, or reopens if already done
 cli-todo delete 12                           # deletes task 12 and all its subtasks
 cli-todo project add Work
-cli-todo project list
+cli-todo project add Work --description "Day job"   # one line, max 100 characters
+cli-todo project describe Work "Day job"     # sets the description; pass "" to clear it
+cli-todo project list                        # "Name" or "Name — description" per line
 cli-todo project rename Work Job
 cli-todo project delete Job [--force]        # --force required if it has tasks; deletes them
 cli-todo -v                                  # version

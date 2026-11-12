@@ -27,6 +27,8 @@ pub struct Task {
 pub struct Project {
     pub id: i64,
     pub name: String,
+    /// One line, at most `MAX_PROJECT_DESCRIPTION` characters; empty when unset.
+    pub description: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,6 +142,7 @@ pub enum Mode {
         selected: usize,
     },
     ProjectEdit(Option<i64>, String),
+    ProjectDescription(i64, String),
     ProjectDelete(i64),
     CommitEdit(String),
     NoChanges,

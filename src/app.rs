@@ -1,5 +1,8 @@
 use crate::{
-    constants::{ACTIONS, ALL_FILTER, FILTERS, KEYBINDINGS, MAX_SUBTASK_DEPTH, PRIORITIES, SORTS},
+    constants::{
+        ACTIONS, ALL_FILTER, FILTERS, KEYBINDINGS, MAX_PROJECT_DESCRIPTION, MAX_SUBTASK_DEPTH,
+        PRIORITIES, SORTS,
+    },
     dates::{date_phrases, parse_due_date, remove_date_phrase},
     db,
     types::{
@@ -491,8 +494,18 @@ impl App {
         if key == KeyCode::Char('q') && matches!(self.mode, Mode::Browse) {
             return self.execute_action(Action::Quit);
         }
-        if let Mode::ProjectEdit(_, text) | Mode::CommitEdit(text) | Mode::RemoteEdit(text) =
-            &mut self.mode
+        if let Mode::ProjectDescription(_, text) = &self.mode {
+            if matches!(key, KeyCode::Char(_)) && text.chars().count() >= MAX_PROJECT_DESCRIPTION {
+                self.message = format!(
+                    "Project descriptions are limited to {MAX_PROJECT_DESCRIPTION} characters"
+                );
+                return Ok(false);
+            }
+        }
+        if let Mode::ProjectEdit(_, text)
+        | Mode::ProjectDescription(_, text)
+        | Mode::CommitEdit(text)
+        | Mode::RemoteEdit(text) = &mut self.mode
         {
             if self.input_cursor.handle(text, key, false) {
                 return Ok(false);
@@ -507,7 +520,9 @@ impl App {
             Mode::Nuke { .. } => self.handle_nuke_key(key)?,
             Mode::ResetHistory { .. } => self.handle_reset_history_key(key),
             Mode::Palette { .. } => return self.handle_palette_key(key),
-            Mode::ProjectEdit(..) => self.handle_project_edit_key(key)?,
+            Mode::ProjectEdit(..) | Mode::ProjectDescription(..) => {
+                self.handle_project_edit_key(key)?
+            }
             Mode::ProjectDelete(id) => self.handle_project_delete_key(key, id)?,
             Mode::CommitEdit(_) => self.handle_commit_edit_key(key)?,
             Mode::NoChanges => {
@@ -1448,7 +1463,10 @@ impl App {
                 query.truncate(range.start);
                 *selected = 0;
             }
-            Mode::ProjectEdit(_, text) | Mode::CommitEdit(text) | Mode::RemoteEdit(text) => {
+            Mode::ProjectEdit(_, text)
+            | Mode::ProjectDescription(_, text)
+            | Mode::CommitEdit(text)
+            | Mode::RemoteEdit(text) => {
                 let range = self.input_cursor.word_deletion_range(text);
                 self.input_cursor.delete(text, range);
             }
@@ -1649,6 +1667,12 @@ impl App {
                     self.mode = Mode::ProjectEdit(Some(project.id), project.name.clone());
                 }
             }
+            KeyCode::Char('i') => {
+                if let Some(project) = self.projects.get(self.selected_project) {
+                    self.input_cursor = crate::editor::TextCursor::default();
+                    self.mode = Mode::ProjectDescription(project.id, project.description.clone());
+                }
+            }
             KeyCode::Char('d') => {
                 if let Some(project) = self.projects.get(self.selected_project) {
                     self.mode = Mode::ProjectDelete(project.id);
@@ -1676,10 +1700,14 @@ impl App {
     }
 
     fn save_project_edit(&mut self) -> Result<()> {
-        let Mode::ProjectEdit(id, name) = &self.mode else {
-            return Ok(());
+        let saved = match &self.mode {
+            Mode::ProjectEdit(id, name) => db::save_project(&self.db, *id, name),
+            Mode::ProjectDescription(id, description) => {
+                db::set_project_description(&self.db, *id, description)
+            }
+            _ => return Ok(()),
         };
-        if let Err(error) = db::save_project(&self.db, *id, name) {
+        if let Err(error) = saved {
             self.message = error.to_string();
             return Ok(());
         }

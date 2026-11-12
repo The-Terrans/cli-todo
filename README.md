@@ -106,6 +106,7 @@ Press **?** while browsing for a scrollable list of all keybindings. **Up/Down**
 | Shift+E in Tasks             | Edit selected (or opened) task in an external editor; saves on exit |
 | Shift+C in Tasks             | Copy hovered task's (or highlighted subtask's) title, a blank line, then its description to the clipboard via OSC 52 (terminal must support it; tmux needs `set-clipboard on`) |
 | e in Projects                | Rename project                                           |
+| i in Projects                | Edit the project's one-line description (max 100 characters), shown above its tasks |
 | Alt+J / Alt+K (or Alt+Down / Alt+Up) in Projects | Move selected project down/up; order is saved |
 | Space                        | Toggle selected row (opened leaf: toggle that task)       |
 | x                            | Toggle opened/selected task between completed and pending |

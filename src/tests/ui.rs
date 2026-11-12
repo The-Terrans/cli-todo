@@ -1200,3 +1200,61 @@ fn subtasks_show_the_same_dim_description_preview_as_tasks() -> Result<()> {
     assert_eq!(selection_rows(buffer, 26), 2, "selection covers both rows");
     Ok(())
 }
+
+#[test]
+fn project_description_is_edited_with_i_capped_and_shown_above_its_tasks() -> Result<()> {
+    let db = db::open(Path::new(":memory:"))?;
+    db::save_project(&db, None, "Work")?;
+    db::create_task(&db, "ship", Some(db.last_insert_rowid()))?;
+    let mut app = App::new_showing_all(db)?;
+    let press =
+        |app: &mut App, key: KeyCode| app.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Char('2'))?;
+    press(&mut app, KeyCode::Char('i'))?;
+    assert!(matches!(&app.mode, Mode::ProjectDescription(_, text) if text.is_empty()));
+    for c in "x".repeat(MAX_PROJECT_DESCRIPTION + 5).chars() {
+        press(&mut app, KeyCode::Char(c))?;
+    }
+    let Mode::ProjectDescription(_, text) = &app.mode else {
+        panic!("description editor closed");
+    };
+    assert_eq!(text.chars().count(), MAX_PROJECT_DESCRIPTION);
+    assert_eq!(
+        app.message,
+        "Project descriptions are limited to 100 characters"
+    );
+    let mut terminal = Terminal::new(TestBackend::new(100, 12))?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let rows = |terminal: &Terminal<TestBackend>| -> Vec<String> {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect()
+            })
+            .collect()
+    };
+    assert!(rows(&terminal)
+        .iter()
+        .any(|row| row.contains("Project description (100/100)")));
+    // Backspace makes room again; Ctrl+W clears the single word.
+    press(&mut app, KeyCode::Backspace)?;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL))?;
+    for c in "Day job".chars() {
+        press(&mut app, KeyCode::Char(c))?;
+    }
+    press(&mut app, KeyCode::Enter)?;
+    assert!(matches!(app.mode, Mode::Browse));
+    assert_eq!(app.projects[0].description, "Day job");
+    press(&mut app, KeyCode::Enter)?;
+    terminal.draw(|frame| draw(frame, &app))?;
+    let rows = rows(&terminal);
+    let description = rows.iter().position(|row| row.contains("Day job"));
+    let task = rows.iter().position(|row| row.contains("ship"));
+    assert!(
+        matches!((description, task), (Some(d), Some(t)) if d < t),
+        "{rows:#?}"
+    );
+    Ok(())
+}
