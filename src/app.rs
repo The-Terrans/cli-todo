@@ -4,7 +4,7 @@ use crate::{
         PRIORITIES, SORTS,
     },
     dates::{date_phrases, parse_due_date, remove_date_phrase},
-    db,
+    db, fuzzy,
     types::{
         Action, App, AutoDate, Filter, History, Mode, Sort, SyncResult, Task, TaskDraft, TaskField,
         TaskPane, TaskView,
@@ -1293,68 +1293,63 @@ impl App {
         Ok(())
     }
 
+    /// The action rows of `palette_results`, without labels for projects or tasks.
+    #[cfg(test)]
     pub fn palette_actions(&self) -> Vec<(&'static str, Action)> {
         let Mode::Palette { query, .. } = &self.mode else {
             return vec![];
         };
-        let query = query.trim().to_lowercase();
+        fuzzy::rank(
+            query,
+            self.available_actions().map(|entry| (entry.0, entry)),
+        )
+    }
+
+    /// Palette actions that apply to the current focus and selection, in menu order.
+    fn available_actions(&self) -> impl Iterator<Item = (&'static str, Action)> {
         let has_task = !self.commits_focused && self.current_task_id().is_some();
         // Only projects have a filter popup; Inbox filters live in the left panel.
         let has_filter = !self.commits_focused && self.current_project.is_some();
         ACTIONS
             .iter()
             .copied()
-            .filter(|(label, action)| {
-                let available = match action {
-                    Action::Filter => has_filter,
-                    Action::Add
-                    | Action::GoToInboxFilter(_)
-                    | Action::ResetHistory
-                    | Action::Quit => true,
-                    _ => has_task,
-                };
-                available && label.to_lowercase().contains(&query)
+            .filter(move |(_, action)| match action {
+                Action::Filter => has_filter,
+                Action::Add | Action::GoToInboxFilter(_) | Action::ResetHistory | Action::Quit => {
+                    true
+                }
+                _ => has_task,
             })
-            .collect()
     }
 
+    /// Actions, projects, and tasks matching the query, ranked together by fuzzy score.
     pub fn palette_results(&self) -> Vec<(String, Action)> {
         let Mode::Palette { query, .. } = &self.mode else {
             return vec![];
         };
-        let query = query.trim().to_lowercase();
-        let mut results: Vec<_> = self
-            .palette_actions()
-            .into_iter()
-            .map(|(label, action)| (format!("Action: {label}"), action))
-            .collect();
-        results.extend(
-            self.projects
-                .iter()
-                .filter(|project| project.name.to_lowercase().contains(&query))
-                .map(|project| {
-                    (
-                        format!("Project: {}", project.name),
-                        Action::OpenProject(project.id),
-                    )
-                }),
-        );
-        results.extend(
-            self.palette_tasks
-                .iter()
-                .filter(|task| task.title.to_lowercase().contains(&query))
-                .map(|task| {
-                    (
-                        format!(
-                            "Task: [{}] {}",
-                            if task.done { "x" } else { " " },
-                            task.title
-                        ),
-                        Action::OpenTask(task.id),
-                    )
-                }),
-        );
-        results
+        let actions = self
+            .available_actions()
+            .map(|(label, action)| (label, (format!("Action: {label}"), action)));
+        let projects = self.projects.iter().map(|project| {
+            (
+                project.name.as_str(),
+                (
+                    format!("Project: {}", project.name),
+                    Action::OpenProject(project.id),
+                ),
+            )
+        });
+        let tasks = self.palette_tasks.iter().map(|task| {
+            let mark = if task.done { "x" } else { " " };
+            (
+                task.title.as_str(),
+                (
+                    format!("Task: [{mark}] {}", task.title),
+                    Action::OpenTask(task.id),
+                ),
+            )
+        });
+        fuzzy::rank(query, actions.chain(projects).chain(tasks))
     }
 
     fn handle_palette_key(&mut self, key: KeyCode) -> Result<bool> {

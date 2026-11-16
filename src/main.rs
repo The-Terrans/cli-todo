@@ -7,6 +7,7 @@ mod db;
 mod editor;
 mod editor_command;
 mod external_editor;
+mod fuzzy;
 mod history;
 mod types;
 mod ui;
