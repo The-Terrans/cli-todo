@@ -1457,6 +1457,40 @@ fn palette_finds_tasks_outside_current_filter() -> Result<()> {
 }
 
 #[test]
+fn palette_fuzzy_matches_and_ranks_best_match_first() -> Result<()> {
+    let mut app = app()?;
+    db::save_task(&app.db, None, "Take it")?;
+    db::save_task(&app.db, None, "Kitchen timer")?;
+    let kitchen = app.db.last_insert_rowid();
+    search_actions(&mut app, "KCHN")?;
+    let labels: Vec<_> = app
+        .palette_results()
+        .into_iter()
+        .map(|(label, _)| label)
+        .collect();
+    assert_eq!(
+        labels,
+        ["Task: [ ] Kitchen timer"],
+        "letters in order, gaps allowed"
+    );
+    app.handle_key(KeyCode::Esc)?;
+    search_actions(&mut app, "kit")?;
+    let labels: Vec<_> = app
+        .palette_results()
+        .into_iter()
+        .map(|(label, _)| label)
+        .collect();
+    assert_eq!(
+        labels,
+        ["Task: [ ] Kitchen timer", "Task: [ ] Take it"],
+        "contiguous match outranks the earlier, scattered one"
+    );
+    app.handle_key(KeyCode::Enter)?;
+    assert_eq!(app.tasks[app.selected_task].id, kitchen);
+    Ok(())
+}
+
+#[test]
 fn palette_finds_and_opens_projects() -> Result<()> {
     let mut app = app()?;
     db::save_project(&app.db, None, "Home")?;
